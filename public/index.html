@@ -1,9 +1,188 @@
 
-nexo/
-├── package.json
-├── server.js
-├── .gitignore
-└── public/
-    ├── index.html
-    ├── style.css
-    └── app.js
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#111019">
+  <title>NEXO — Conecte-se ao seu mundo</title>
+  <link rel="stylesheet" href="/style.css">
+  <script src="/socket.io/socket.io.js" defer></script>
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <div id="authView" class="auth-screen">
+    <div class="auth-card">
+      <div class="brand brand-large">
+        <span class="brand-mark">N</span>
+        <span>NEXO<span class="brand-dot">.</span></span>
+      </div>
+      <p class="muted">Seu espaço. Sua comunidade.</p>
+
+      <div class="auth-tabs">
+        <button id="loginTab" class="tab active" type="button">Entrar</button>
+        <button id="registerTab" class="tab" type="button">Criar conta</button>
+      </div>
+
+      <form id="authForm">
+        <label id="usernameLabel" class="hidden" for="username">Nome de usuário</label>
+        <input id="username" class="hidden" autocomplete="username"
+          minlength="3" maxlength="24" placeholder="Nome de usuário">
+
+        <label for="identifier">E-mail ou usuário</label>
+        <input id="identifier" autocomplete="username"
+          maxlength="254" placeholder="voce@exemplo.com" required>
+
+        <label for="password">Senha</label>
+        <input id="password" type="password" autocomplete="current-password"
+          minlength="10" maxlength="72" placeholder="Mínimo de 10 caracteres" required>
+
+        <button id="authSubmit" class="primary-btn full-width" type="submit">
+          Entrar no NEXO
+        </button>
+        <p id="authError" class="form-message" role="status"></p>
+      </form>
+
+      <p class="auth-foot muted">Uma nova forma de se conectar.</p>
+    </div>
+  </div>
+
+  <div id="appView" class="app-shell hidden">
+    <aside class="server-rail">
+      <div class="rail-logo" title="NEXO">N</div>
+      <div class="rail-divider"></div>
+      <button class="rail-icon selected" title="Comunidade">N</button>
+      <button class="rail-icon" id="themeShortcut" title="Personalizar">✦</button>
+    </aside>
+
+    <aside class="sidebar">
+      <div class="sidebar-heading">
+        <div>
+          <span class="eyebrow">SUA COMUNIDADE</span>
+          <h2>NEXO <span class="brand-dot">.</span></h2>
+        </div>
+        <span class="online-dot" title="Conectado"></span>
+      </div>
+
+      <div class="sidebar-section">
+        <p class="section-label">CANAIS DE TEXTO</p>
+        <nav id="channelList" class="channel-list"></nav>
+      </div>
+
+      <div class="sidebar-tip">
+        <span class="tip-icon">✦</span>
+        <strong>Seu mundo, suas regras.</strong>
+        <p>Personalize sua experiência e converse com sua comunidade.</p>
+      </div>
+
+      <div class="user-panel">
+        <div id="userAvatar" class="avatar">N</div>
+        <div class="user-info">
+          <strong id="currentUsername">Usuário</strong>
+          <span>Conectado</span>
+        </div>
+        <button id="settingsButton" class="icon-btn" title="Personalização">⚙</button>
+        <button id="logoutButton" class="icon-btn" title="Sair">↪</button>
+      </div>
+    </aside>
+
+    <main class="chat-area">
+      <header class="chat-header">
+        <div>
+          <div class="channel-title">
+            <span id="channelIcon" class="hash">#</span>
+            <h1 id="channelName">geral</h1>
+          </div>
+          <p id="channelDescription">Um espaço para conversar e compartilhar ideias.</p>
+        </div>
+        <div class="header-actions">
+          <span class="live-label"><span class="online-dot"></span> NEXO online</span>
+        </div>
+      </header>
+
+      <div id="connectionBanner" class="connection-banner hidden">
+        Reconectando ao chat...
+      </div>
+
+      <section id="messages" class="messages" aria-live="polite">
+        <div class="welcome-card">
+          <div class="welcome-symbol">✦</div>
+          <h2>Bem-vindo ao NEXO</h2>
+          <p>As boas conversas começam aqui.</p>
+        </div>
+      </section>
+
+      <div id="chatError" class="chat-error" role="status"></div>
+
+      <form id="messageForm" class="message-form">
+        <button id="emojiButton" class="composer-tool" type="button" title="Adicionar emoji">☺</button>
+        <input id="messageInput" maxlength="2000"
+          placeholder="Envie uma mensagem para o canal..." autocomplete="off">
+        <button class="send-button" type="submit" aria-label="Enviar mensagem">➤</button>
+      </form>
+      <p class="composer-hint">Converse com respeito. Você está no NEXO.</p>
+    </main>
+
+    <aside class="right-panel">
+      <div class="right-heading">
+        <span class="eyebrow">NEXO SPACE</span>
+        <button id="closeRightPanel" class="icon-btn mobile-only" type="button">×</button>
+      </div>
+
+      <section class="space-card">
+        <div class="space-art">
+          <div class="orbit orbit-one"></div>
+          <div class="orbit orbit-two"></div>
+          <div class="space-core">N</div>
+          <span class="star star-one">✦</span>
+          <span class="star star-two">✧</span>
+        </div>
+        <h3>Seu espaço digital</h3>
+        <p>Um lugar para compartilhar ideias, encontrar pessoas e criar conexões.</p>
+      </section>
+
+      <section class="right-section">
+        <p class="section-label">NESTA VERSÃO</p>
+        <div class="feature-row"><span>✦</span><div><strong>Chat ao vivo</strong><small>Mensagens em tempo real</small></div></div>
+        <div class="feature-row"><span>◈</span><div><strong>Seu estilo</strong><small>Temas e cores personalizáveis</small></div></div>
+        <div class="feature-row"><span>◎</span><div><strong>Próximas novidades</strong><small>Voz, vídeo e NEXO AI</small></div></div>
+      </section>
+
+      <section id="settingsPanel" class="settings-panel hidden">
+        <div class="settings-heading">
+          <h3>Personalizar</h3>
+          <button id="closeSettings" class="icon-btn" type="button">×</button>
+        </div>
+
+        <label for="accentColor">Cor de destaque</label>
+        <input id="accentColor" type="color" value="#8b5cf6">
+
+        <label for="themeSelect">Tema</label>
+        <select id="themeSelect">
+          <option value="dark">Escuro</option>
+          <option value="midnight">Meia-noite</option>
+          <option value="light">Claro</option>
+        </select>
+
+        <label for="fontSelect">Fonte</label>
+        <select id="fontSelect">
+          <option value="inter">Moderna</option>
+          <option value="serif">Serifada</option>
+          <option value="mono">Monoespaçada</option>
+        </select>
+
+        <label for="fontSize">Tamanho das letras</label>
+        <input id="fontSize" type="range" min="14" max="20" value="16">
+        <p id="fontSizeLabel" class="muted">16 px</p>
+
+        <button id="saveSettings" class="primary-btn full-width" type="button">
+          Salvar aparência
+        </button>
+        <p id="settingsMessage" class="form-message" role="status"></p>
+      </section>
+    </aside>
+  </div>
+
+  <div id="toast" class="toast" role="status"></div>
+</body>
+</html>
