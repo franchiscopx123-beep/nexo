@@ -1400,12 +1400,21 @@ function showCallWindow() {
   callOverlay.hidden = false;
 }
 
+
 function updateCallButtons() {
   const inCall = callPeerId !== null && callPeerId !== undefined;
 
   voiceCallBtn.disabled = inCall;
   videoCallBtn.disabled = inCall;
   callUserSelect.disabled = inCall;
+
+  const videoCallActive =
+    inCall &&
+    callMode === "video" &&
+    localStream !== null &&
+    localStream.getVideoTracks().some(track => track.readyState === "live");
+
+  switchCameraBtn.hidden = !videoCallActive;
 }
 
 function resetCallInterface() {
@@ -1705,8 +1714,8 @@ async function startCall(mode) {
     localVideo.srcObject = localStream;
     localVideo.hidden = mode !== "video";
     remoteVideo.hidden = mode !== "video";
-    switchCameraBtn.hidden = mode !== "video";
-
+   switchCameraBtn.hidden = mode !== "video";
+    updateCallButtons();
     createPeerConnection();
 
     if (!socket?.connected) {
@@ -1751,7 +1760,8 @@ async function acceptIncomingCall() {
     localVideo.srcObject = localStream;
     localVideo.hidden = callMode !== "video";
     remoteVideo.hidden = callMode !== "video";
-    switchCameraBtn.hidden = callMode !== "video";
+  switchCameraBtn.hidden = callMode !== "video";
+    updateCallButtons();
 
     createPeerConnection();
 
