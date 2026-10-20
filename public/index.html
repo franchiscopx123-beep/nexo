@@ -1028,17 +1028,27 @@ await enterChat();
             return;
           }
 
-          await api("/api/login", {
-            method: "POST",
-            body: JSON.stringify({
-              identifier: identifierInput.value.trim(),
-              password
-            })
-          });
+          
+await api("/api/login", {
+  method: "POST",
+  body: JSON.stringify({
+    identifier: identifierInput.value.trim(),
+    password
+  })
+});
 
-          const data = await api("/api/me");
-          currentUser = data.user || data;
-          await enterChat();
+const data = await api("/api/me");
+
+if (!data.authenticated || !data.user) {
+  throw new Error(
+    "O login foi enviado, mas a sessão não foi confirmada. " +
+    "Verifique o cookie de sessão no servidor."
+  );
+}
+
+currentUser = data.user;
+await enterChat();
+
         } catch (error) {
           showNotice(authNotice, error.message || "Não foi possível concluir a operação.");
         } finally {
