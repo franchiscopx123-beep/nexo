@@ -1,50 +1,53 @@
-```html
+
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="theme-color" content="#0b1120">
-  <title>NEXO — Conversas</title>
-
+  <meta name="theme-color" content="#101522">
+  <title>NEXO — Conecte-se</title>
   <style>
     * { box-sizing: border-box; }
 
     :root {
       color-scheme: dark;
-      --bg: #0b1120;
-      --panel: #111827;
-      --panel2: #172033;
-      --border: #29364b;
-      --text: #f8fafc;
-      --muted: #94a3b8;
-      --blue: #3b82f6;
-      --green: #22c55e;
-      --red: #ef4444;
+      --bg: #101522;
+      --panel: #171e2e;
+      --panel2: #202a3d;
+      --line: #2c3850;
+      --text: #edf2ff;
+      --muted: #929db4;
+      --accent: #6578ff;
+      --accent-hover: #7c8bff;
+      --danger: #ff777f;
     }
+
+    [hidden] { display: none !important; }
 
     body {
       margin: 0;
       min-height: 100vh;
-      font-family: Arial, Helvetica, sans-serif;
       background: var(--bg);
       color: var(--text);
+      font-family: Inter, system-ui, -apple-system, sans-serif;
     }
 
     button, input, textarea { font: inherit; }
     button { cursor: pointer; }
-    button:disabled { opacity: .5; cursor: not-allowed; }
-    [hidden], .hidden { display: none !important; }
 
-    /* AUTENTICAÇÃO */
-    #authView {
+    button:focus-visible, input:focus-visible,
+    textarea:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
+    }
+
+    .auth-container {
       min-height: 100vh;
-      display: flex;
-      align-items: center;
-      justify-content: center;
+      display: grid;
+      place-items: center;
       padding: 24px;
       background:
-        radial-gradient(circle at top, #1e3a5f 0, transparent 45%),
+        radial-gradient(ellipse at top, #25305b 0%, transparent 52%),
         var(--bg);
     }
 
@@ -52,222 +55,888 @@
       width: 100%;
       max-width: 420px;
       padding: 32px;
-      border: 1px solid var(--border);
+      border: 1px solid var(--line);
       border-radius: 20px;
-      background: var(--panel);
-      box-shadow: 0 20px 60px #0005;
+      background: rgba(23, 30, 46, .96);
+      box-shadow: 0 24px 80px #0005;
+    }
+
+    .auth-header { text-align: center; margin-bottom: 28px; }
+    .auth-header h1 {
+      margin: 0;
+      font-size: 42px;
+      letter-spacing: 7px;
+      color: #8290ff;
+    }
+    .auth-header p { color: var(--muted); margin-bottom: 0; }
+
+    .auth-tabs {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      padding: 5px;
+      margin-bottom: 24px;
+      background: #101522;
+      border-radius: 12px;
+    }
+
+    .auth-tabs button {
+      border: 0;
+      padding: 11px;
+      color: var(--muted);
+      background: transparent;
+      border-radius: 9px;
+    }
+
+    .auth-tabs button.active {
+      color: white;
+      background: var(--panel2);
+    }
+
+    label {
+      display: block;
+      margin-bottom: 8px;
+      font-size: 13px;
+      font-weight: 600;
+      color: #cbd4e8;
+    }
+
+    #authForm > div:not([hidden]) { margin-bottom: 18px; }
+
+    input, textarea {
+      width: 100%;
+      border: 1px solid var(--line);
+      background: #101522;
+      color: var(--text);
+      border-radius: 10px;
+      padding: 13px 14px;
+    }
+
+    input::placeholder, textarea::placeholder { color: #68758d; }
+
+    .password-wrapper { position: relative; }
+    .password-wrapper input { padding-right: 82px; }
+
+    .password-toggle {
+      position: absolute;
+      right: 9px;
+      top: 50%;
+      transform: translateY(-50%);
+      border: 0;
+      background: transparent;
+      color: #a8b2ff;
+      font-size: 12px;
+    }
+
+    #authSubmit, .primary-button {
+      width: 100%;
+      border: 0;
+      border-radius: 10px;
+      padding: 13px 16px;
+      background: var(--accent);
+      color: white;
+      font-weight: 700;
+    }
+
+    #authSubmit:hover, .primary-button:hover {
+      background: var(--accent-hover);
+    }
+
+    button:disabled { opacity: .6; cursor: wait; }
+
+    .form-message {
+      min-height: 18px;
+      margin: 10px 0;
+      color: var(--danger);
+      font-size: 13px;
+      line-height: 1.5;
+    }
+
+    .form-message.success { color: #73d6a0; }
+
+    /* Aplicativo de conversas */
+    #appView {
+      height: 100dvh;
+      min-height: 400px;
+      display: flex;
+      overflow: hidden;
+      background: var(--bg);
+    }
+
+    #sidebar {
+      flex: 0 0 260px;
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+      padding: 22px 14px;
+      background: #151c2b;
+      border-right: 1px solid var(--line);
     }
 
     .brand {
-      margin: 0 0 8px;
-      text-align: center;
-      font-size: 36px;
-      font-weight: 800;
-      letter-spacing: 5px;
-      color: #60a5fa;
-    }
-
-    .subtitle {
-      margin: 0 0 28px;
-      text-align: center;
-      color: var(--muted);
-    }
-
-    .tabs { display: flex; gap: 8px; margin-bottom: 24px; }
-
-    .tabs button {
-      flex: 1;
-      padding: 12px;
-      border: 1px solid var(--border);
-      border-radius: 10px;
-      color: #cbd5e1;
-      background: #1e293b;
-    }
-
-    .tabs button.active {
-      color: white;
-      background: #2563eb;
-      border-color: #2563eb;
-    }
-
-    .field { margin-bottom: 16px; }
-
-    .field label {
-      display: block;
-      margin-bottom: 8px;
-      font-size: 14px;
-      color: #cbd5e1;
-    }
-
-    .field input {
-      width: 100%;
-      min-height: 46px;
-      padding: 12px;
-      border: 1px solid #475569;
-      border-radius: 10px;
-      outline: none;
-      color: white;
-      background: #0f172a;
-    }
-
-    .field input:focus { border-color: #60a5fa; }
-
-    .password-wrap { display: flex; gap: 8px; }
-    .password-wrap input { min-width: 0; flex: 1; }
-
-    .password-wrap button {
-      padding: 0 12px;
-      border: 1px solid var(--border);
-      border-radius: 10px;
-      color: #cbd5e1;
-      background: #1e293b;
-    }
-
-    .primary {
-      width: 100%;
-      min-height: 46px;
-      padding: 12px 16px;
-      border: 0;
-      border-radius: 10px;
-      background: var(--blue);
-      color: white;
-      font-weight: 700;
-    }
-
-    .primary:hover { background: #2563eb; }
-
-    .message {
-      min-height: 20px;
-      margin: 12px 0 0;
-      color: #fca5a5;
-      font-size: 14px;
-      line-height: 1.5;
-      overflow-wrap: anywhere;
-    }
-
-    /* APLICAÇÃO */
-    #appView {
-      min-height: 100vh;
-      display: grid;
-      grid-template-columns: 245px minmax(0, 1fr);
-    }
-
-    .sidebar {
       display: flex;
-      flex-direction: column;
-      min-height: 100vh;
-      background: #0f172a;
-      border-right: 1px solid var(--border);
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 8px 22px;
     }
 
-    .side-brand {
-      padding: 23px 20px;
-      font-size: 23px;
-      font-weight: 800;
+    .brand h2 {
+      margin: 0;
+      font-size: 25px;
       letter-spacing: 4px;
-      color: #60a5fa;
-      border-bottom: 1px solid var(--border);
+      color: #8290ff;
     }
 
-    .side-heading {
-      padding: 22px 18px 10px;
+    #logoutButton {
+      background: transparent;
+      color: var(--muted);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 7px 9px;
+      font-size: 12px;
+    }
+
+    #newChatButton {
+      border: 0;
+      background: var(--accent);
+      color: white;
+      border-radius: 9px;
+      padding: 11px;
+      font-weight: 600;
+      margin-bottom: 24px;
+    }
+
+    .section-label {
       color: var(--muted);
       font-size: 11px;
       font-weight: 700;
-      letter-spacing: 1.5px;
-      text-transform: uppercase;
+      letter-spacing: 1.3px;
+      padding: 0 9px 10px;
     }
 
     #channelsList {
       display: grid;
       gap: 5px;
-      padding: 0 10px;
+      overflow-y: auto;
     }
 
-    .channel-btn {
+    .channel-button {
       width: 100%;
-      padding: 11px 12px;
       text-align: left;
       border: 0;
       border-radius: 8px;
-      color: #cbd5e1;
       background: transparent;
+      color: #aeb9ce;
+      padding: 12px;
     }
 
-    .channel-btn:hover { background: #1e293b; }
-
-    .channel-btn.active {
+    .channel-button:hover { background: #202a3d; }
+    .channel-button.active {
+      background: #303b62;
       color: white;
-      background: #1d4ed8;
     }
 
-    .sidebar-spacer { flex: 1; min-height: 24px; }
-
-    .profile {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      padding: 16px;
-      border-top: 1px solid var(--border);
-      background: #111827;
+    .sidebar-bottom {
+      margin-top: auto;
+      padding: 18px 8px 0;
+      border-top: 1px solid var(--line);
+      color: var(--muted);
+      font-size: 12px;
+      overflow-wrap: anywhere;
     }
 
-    .avatar {
-      display: grid;
-      place-items: center;
-      width: 38px;
-      height: 38px;
-      flex-shrink: 0;
-      border-radius: 50%;
-      background: #2563eb;
-      font-weight: 700;
-    }
-
-    .profile-info { min-width: 0; flex: 1; }
-    .profile-name { font-weight: 700; overflow-wrap: anywhere; }
-    .profile-status { margin-top: 4px; color: var(--green); font-size: 12px; }
-
-    .logout-btn {
-      padding: 8px 10px;
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      color: #cbd5e1;
-      background: #1e293b;
-    }
-
-    .workspace {
+    #chatView {
+      flex: 1;
+      min-width: 0;
+      min-height: 0;
       display: flex;
       flex-direction: column;
-      min-width: 0;
-      height: 100vh;
-      height: 100dvh;
+      background: #101522;
     }
 
-    .topbar {
+    #chatHeader {
+      min-height: 72px;
       display: flex;
       align-items: center;
       gap: 12px;
-      min-height: 70px;
-      padding: 16px 24px;
-      border-bottom: 1px solid var(--border);
-      background: #0f172a;
+      padding: 0 24px;
+      border-bottom: 1px solid var(--line);
+      background: #141b2a;
     }
 
-    .topbar h2 { margin: 0; font-size: 18px; }
-    .topbar p { margin: 5px 0 0; color: var(--muted); font-size: 12px; }
+    #chatHeader h2 { margin: 0; font-size: 17px; }
+    #chatSubtitle { color: var(--muted); font-size: 12px; margin-top: 4px; }
 
-    .channel-symbol { color: #64748b; font-size: 26px; }
+    #messages {
+      flex: 1;
+      min-height: 0;
+      overflow-y: auto;
+      padding: 22px 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 17px;
+    }
 
-    #connectionStatus {
-      margin-left: auto;
+    .welcome {
+      margin: auto;
+      max-width: 360px;
+      text-align: center;
+      color: var(--muted);
+      line-height: 1.7;
+    }
+
+    .welcome .welcome-icon { font-size: 42px; }
+    .welcome h3 { color: var(--text); margin-bottom: 5px; }
+
+    .message {
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+      max-width: 850px;
+    }
+
+    .avatar {
+      flex: 0 0 38px;
+      width: 38px;
+      height: 38px;
+      display: grid;
+      place-items: center;
+      border-radius: 50%;
+      background: #303b62;
+      color: #dfe4ff;
+      font-weight: 700;
+    }
+
+    .message-content { min-width: 0; }
+    .message-meta {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: baseline;
+      gap: 9px;
+      margin: 2px 0 6px;
+    }
+
+    .message-author { font-size: 13px; font-weight: 700; }
+    .message-time { font-size: 11px; color: var(--muted); }
+
+    .message-text {
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+      line-height: 1.6;
+      color: #d7deed;
+      font-size: 14px;
+    }
+
+    #messageForm {
+      display: flex;
+      align-items: flex-end;
+      gap: 10px;
+      padding: 16px 24px 22px;
+      border-top: 1px solid #222c40;
+    }
+
+    #messageInput {
+      min-height: 48px;
+      max-height: 150px;
+      resize: none;
+      line-height: 1.5;
+      border-radius: 12px;
+      padding: 13px 15px;
+    }
+
+    #messageForm button {
+      flex: 0 0 auto;
+      border: 0;
+      border-radius: 10px;
+      background: var(--accent);
+      color: white;
+      padding: 14px 18px;
+      font-weight: 700;
+    }
+
+    #chatStatus {
+      padding: 0 24px 10px;
       color: var(--muted);
       font-size: 12px;
     }
 
-    #connectionStatus.online { color: var(--green); }
+    @media (max-width: 650px) {
+      #sidebar { flex-basis: 112px; padding: 14px 8px; }
+      .brand { padding: 0 3px 18px; flex-direction: column; gap: 10px; }
+      .brand h2 { font-size: 19px; }
+      #logoutButton { padding: 6px; }
+      #newChatButton { font-size: 11px; padding: 9px 5px; }
+      .section-label { font-size: 9px; padding-left: 5px; }
+      .channel-button { padding: 10px 7px; font-size: 12px; }
+      .sidebar-bottom { padding: 12px 3px 0; font-size: 10px; }
+      #chatHeader { min-height: 62px; padding: 0 14px; }
+      #messages { padding: 18px 12px; }
+      #messageForm { padding: 12px; gap: 7px; }
+      #messageForm button { padding: 14px 11px; }
+    }
 
-    #chatMessages {
-      display: flex;
-      flex: 1;
-      flex-direction: column;
-      gap: 14px
+    @media (max-width: 400px) {
+      .auth-card { padding: 23px 18px; }
+      #sidebar { flex-basis: 94px; }
+      #chatHeader h2 { font-size: 15px; }
+      .avatar { flex-basis: 30px; width: 30px; height: 30px; }
+    }
+  </style>
+</head>
+<body>
+  <main class="auth-container" id="authView">
+    <section class="auth-card">
+      <header class="auth-header">
+        <h1>NEXO</h1>
+        <p>Conecte-se com o seu mundo.</p>
+      </header>
+
+      <div class="auth-tabs">
+        <button type="button" id="loginTab" class="active">Entrar</button>
+        <button type="button" id="registerTab">Cadastrar</button>
+      </div>
+
+      <form id="authForm">
+        <div id="nameGroup" hidden>
+          <label for="name">Nome de usuário</label>
+          <input id="name" name="username" type="text"
+            placeholder="Ex.: usuario123" autocomplete="username"
+            minlength="3" maxlength="24" pattern="[a-zA-Z0-9_]{3,24}">
+        </div>
+
+        <div id="emailGroup">
+          <label for="email">E-mail</label>
+          <input id="email" name="email" type="email"
+            placeholder="seu@email.com" autocomplete="email" required>
+        </div>
+
+        <div id="identifierGroup">
+          <label for="identifier">Usuário ou e-mail</label>
+          <input id="identifier" name="identifier" type="text"
+            placeholder="Seu usuário ou e-mail" autocomplete="username">
+        </div>
+
+        <div id="passwordGroup">
+          <label for="password">Senha</label>
+          <div class="password-wrapper">
+            <input id="password" name="password" type="password"
+              placeholder="Digite sua senha" autocomplete="current-password"
+              required>
+            <button type="button" id="togglePassword"
+              class="password-toggle">Mostrar</button>
+          </div>
+        </div>
+
+        <div id="confirmPasswordGroup" hidden>
+          <label for="confirmPassword">Confirmar senha</label>
+          <div class="password-wrapper">
+            <input id="confirmPassword" type="password"
+              placeholder="Digite a senha novamente" autocomplete="new-password">
+            <button type="button" id="toggleConfirmPassword"
+              class="password-toggle">Mostrar</button>
+          </div>
+        </div>
+
+        <p id="authMessage" class="form-message" aria-live="polite"></p>
+        <button type="submit" id="authSubmit">Entrar</button>
+      </form>
+    </section>
+  </main>
+
+  <main id="appView" hidden>
+    <aside id="sidebar">
+      <div class="brand">
+        <h2>NEXO</h2>
+        <button type="button" id="logoutButton">Sair</button>
+      </div>
+
+      <button type="button" id="newChatButton">＋ Nova conversa</button>
+      <div class="section-label">CANAIS DE TEXTO</div>
+      <div id="channelsList"></div>
+
+      <div class="sidebar-bottom">
+        Conectado como<br>
+        <strong id="currentUsername">Usuário</strong>
+      </div>
+    </aside>
+
+    <section id="chatView">
+      <header id="chatHeader">
+        <div>
+          <h2 id="chatTitle"># geral</h2>
+          <div id="chatSubtitle">Converse com a comunidade NEXO</div>
+        </div>
+      </header>
+
+      <div id="messages" aria-live="polite">
+        <div class="welcome">
+          <div class="welcome-icon">✦</div>
+          <h3>Bem-vindo ao NEXO</h3>
+          <p>Escolha um canal e comece uma conversa.</p>
+        </div>
+      </div>
+
+      <div id="chatStatus" role="status">Conectando...</div>
+
+      <form id="messageForm">
+        <textarea id="messageInput" name="message"
+          placeholder="Digite sua mensagem..." rows="1"
+          maxlength="2000" required></textarea>
+        <button type="submit" id="sendButton">Enviar</button>
+      </form>
+    </section>
+  </main>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script>
+    "use strict";
+
+    const $ = (id) => document.getElementById(id);
+
+    const authView = $("authView");
+    const appView = $("appView");
+    const authForm = $("authForm");
+    const authMessage = $("authMessage");
+    const authSubmit = $("authSubmit");
+    const loginTab = $("loginTab");
+    const registerTab = $("registerTab");
+    const nameGroup = $("nameGroup");
+    const emailGroup = $("emailGroup");
+    const identifierGroup = $("identifierGroup");
+    const confirmPasswordGroup = $("confirmPasswordGroup");
+    const password = $("password");
+    const confirmPassword = $("confirmPassword");
+    const messages = $("messages");
+    const messageInput = $("messageInput");
+    const messageForm = $("messageForm");
+    const chatStatus = $("chatStatus");
+    const channelsList = $("channelsList");
+
+    let mode = "login";
+    let currentUser = null;
+    let currentChannel = "geral";
+    let socket = null;
+    let channelList = ["geral", "jogos", "tecnologia", "conversa"];
+    let requestVersion = 0;
+
+    async function api(url, options = {}) {
+      const response = await fetch(url, {
+        credentials: "same-origin",
+        ...options,
+        headers: {
+          "Content-Type": "application/json",
+          ...(options.headers || {})
+        }
+      });
+
+      const data = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        throw new Error(data.error || "Não foi possível completar a solicitação.");
+      }
+
+      return data;
+    }
+
+    function showAuth(message = "") {
+      authView.hidden = false;
+      appView.hidden = true;
+      authMessage.textContent = message;
+      authMessage.classList.remove("success");
+    }
+
+    function showApp(user) {
+      currentUser = user;
+      $("currentUsername").textContent = user.username;
+      authView.hidden = true;
+      appView.hidden = false;
+      document.title = "NEXO — Conversas";
+    }
+
+    function setMode(nextMode) {
+      mode = nextMode;
+      const registering = mode === "register";
+
+      loginTab.classList.toggle("active", !registering);
+      registerTab.classList.toggle("active", registering);
+      nameGroup.hidden = !registering;
+      emailGroup.hidden = !registering;
+      identifierGroup.hidden = registering;
+      confirmPasswordGroup.hidden = !registering;
+
+      $("name").required = registering;
+      $("email").required = registering;
+      $("identifier").required = !registering;
+      confirmPassword.required = registering;
+
+      password.autocomplete = registering ? "new-password" : "current-password";
+      authSubmit.textContent = registering ? "Criar conta" : "Entrar";
+      authMessage.textContent = "";
+    }
+
+    loginTab.addEventListener("click", () => setMode("login"));
+    registerTab.addEventListener("click", () => setMode("register"));
+
+    function togglePassword(inputId, buttonId) {
+      const input = $(inputId);
+      const button = $(buttonId);
+
+      button.addEventListener("click", () => {
+        const visible = input.type === "password";
+        input.type = visible ? "text" : "password";
+        button.textContent = visible ? "Ocultar" : "Mostrar";
+        button.setAttribute("aria-pressed", String(visible));
+      });
+    }
+
+    togglePassword("password", "togglePassword");
+    togglePassword("confirmPassword", "toggleConfirmPassword");
+
+    authForm.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      authMessage.textContent = "";
+      authSubmit.disabled = true;
+
+      try {
+        let data;
+
+        if (mode === "register") {
+          const username = $("name").value.trim();
+          const email = $("email").value.trim();
+          const pass = password.value;
+
+          if (pass.length < 6 ||
+              !/[a-z]/.test(pass) ||
+              !/[A-Z]/.test(pass) ||
+              !/[0-9]/.test(pass) ||
+              !/[^A-Za-z0-9]/.test(pass) ||
+              new TextEncoder().encode(pass).length > 72) {
+            throw new Error(
+              "A senha precisa ter 6+ caracteres, maiúscula, minúscula, número e símbolo."
+            );
+          }
+
+          if (pass !== confirmPassword.value) {
+            throw new Error("As senhas não coincidem.");
+          }
+
+          data = await api("/api/register", {
+            method: "POST",
+            body: JSON.stringify({ username, email, password: pass })
+          });
+        } else {
+          data = await api("/api/login", {
+            method: "POST",
+            body: JSON.stringify({
+              identifier: $("identifier").value.trim(),
+              password: password.value
+            })
+          });
+        }
+
+        await enterChat(data.user);
+      } catch (error) {
+        authMessage.textContent = error.message;
+      } finally {
+        authSubmit.disabled = false;
+      }
+    });
+
+    function renderChannels() {
+      channelsList.replaceChildren();
+
+      channelList.forEach((channel) => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "channel-button";
+        button.classList.toggle("active", channel === currentChannel);
+        button.textContent = "#  " + channel;
+        button.addEventListener("click", () => joinChannel(channel));
+        channelsList.appendChild(button);
+      });
+    }
+
+    function clearMessages() {
+      messages.replaceChildren();
+    }
+
+    function showWelcome(text) {
+      clearMessages();
+
+      const welcome = document.createElement("div");
+      welcome.className = "welcome";
+
+      const icon = document.createElement("div");
+      icon.className = "welcome-icon";
+      icon.textContent = "✦";
+
+      const title = document.createElement("h3");
+      title.textContent = text;
+
+      const description = document.createElement("p");
+      description.textContent = "Envie a primeira mensagem deste canal.";
+
+      welcome.append(icon, title, description);
+      messages.appendChild(welcome);
+    }
+
+    function addMessage(message) {
+      if (!message || typeof message.message !== "string") return;
+
+      const welcome = messages.querySelector(".welcome");
+      if (welcome) welcome.remove();
+
+      const item = document.createElement("article");
+      item.className = "message";
+
+      const avatar = document.createElement("div");
+      avatar.className = "avatar";
+      avatar.textContent = (message.username || "?").charAt(0).toUpperCase();
+
+      const content = document.createElement("div");
+      content.className = "message-content";
+
+      const meta = document.createElement("div");
+      meta.className = "message-meta";
+
+      const author = document.createElement("span");
+      author.className = "message-author";
+      author.textContent = message.username || "Usuário";
+
+      const time = document.createElement("time");
+      time.className = "message-time";
+
+      if (message.created_at) {
+        const date = new Date(message.created_at);
+        if (!Number.isNaN(date.getTime())) {
+          time.dateTime = date.toISOString();
+          time.textContent = date.toLocaleString("pt-BR", {
+            day: "2-digit", month: "2-digit",
+            hour: "2-digit", minute: "2-digit"
+          });
+        }
+      }
+
+      const text = document.createElement("div");
+      text.className = "message-text";
+      text.textContent = message.message;
+
+      meta.append(author, time);
+      content.append(meta, text);
+      item.append(avatar, content);
+      messages.appendChild(item);
+      messages.scrollTop = messages.scrollHeight;
+    }
+
+    function joinChannel(channel) {
+      if (!channelList.includes(channel)) return;
+
+      currentChannel = channel;
+      $("chatTitle").textContent = "# " + channel;
+      renderChannels();
+      showWelcome("Canal #" + channel);
+      chatStatus.textContent = "Carregando mensagens...";
+
+      const version = ++requestVersion;
+
+      if (socket && socket.connected) {
+        socket.emit("join channel", channel);
+      } else {
+        loadHistory(channel, version);
+      }
+    }
+
+    async function loadHistory(channel, version) {
+      try {
+        const history = await api(
+          "/api/messages/" + encodeURIComponent(channel)
+        );
+
+        if (version !== requestVersion || channel !== currentChannel) return;
+
+        clearMessages();
+        history.forEach(addMessage);
+
+        if (history.length === 0) showWelcome("Canal #" + channel);
+        chatStatus.textContent = "Você está no canal #" + channel;
+      } catch (error) {
+        if (version !== requestVersion) return;
+        chatStatus.textContent = error.message;
+      }
+    }
+
+    function connectSocket() {
+      if (typeof window.io !== "function") {
+        chatStatus.textContent =
+          "Socket.IO não carregou. Verifique a conexão com o servidor.";
+        return;
+      }
+
+      if (socket) socket.disconnect();
+
+      socket = window.io({
+        withCredentials: true,
+        reconnection: true
+      });
+
+      socket.on("connect", () => {
+        chatStatus.textContent = "Conectado em tempo real";
+        socket.emit("join channel", currentChannel);
+      });
+
+      socket.on("disconnect", () => {
+        chatStatus.textContent = "Reconectando ao chat...";
+      });
+
+      socket.on("connect_error", (error) => {
+        chatStatus.textContent =
+          "Falha na conexão: " + (error.message || "tente novamente");
+      });
+
+      socket.on("channel joined", ({ channel }) => {
+        if (channel === currentChannel) {
+          chatStatus.textContent = "Você está no canal #" + channel;
+        }
+      });
+
+      socket.on("chat history", (history) => {
+        clearMessages();
+        history.forEach(addMessage);
+        if (history.length === 0) showWelcome("Canal #" + currentChannel);
+        chatStatus.textContent = "Você está no canal #" + currentChannel;
+      });
+
+      socket.on("chat message", (message) => {
+        if (message.channel === currentChannel) addMessage(message);
+      });
+
+      socket.on("error message", (data) => {
+        chatStatus.textContent = data.error || "Ocorreu um erro no chat.";
+      });
+    }
+
+    async function enterChat(user) {
+      showApp(user);
+
+      try {
+        const channels = await api("/api/channels");
+        if (Array.isArray(channels) && channels.length) {
+          channelList = channels;
+        }
+      } catch (error) {
+        console.error("Não foi possível carregar os canais:", error);
+      }
+
+      renderChannels();
+      joinChannel(channelList.includes("geral") ? "geral" : channelList[0]);
+      connectSocket();
+    }
+
+    messageForm.addEventListener("submit", (event) => {
+      event.preventDefault();
+
+      const message = messageInput.value.trim();
+      if (!message) return;
+
+      if (!socket || !socket.connected) {
+        chatStatus.textContent = "Aguardando conexão com o chat...";
+        return;
+      }
+
+      const sendButton = $("sendButton");
+      sendButton.disabled = true;
+
+      socket.timeout(8000).emit("send message", {
+        channel: currentChannel,
+        message
+      }, (error, response) => {
+        sendButton.disabled = false;
+
+        if (error) {
+          chatStatus.textContent = "Tempo esgotado. Tente novamente.";
+          return;
+        }
+
+        if (response && response.error) {
+          chatStatus.textContent = response.error;
+          return;
+        }
+
+        messageInput.value = "";
+        messageInput.style.height = "auto";
+        messageInput.focus();
+      });
+    });
+
+    messageInput.addEventListener("input", () => {
+      messageInput.style.height = "auto";
+      messageInput.style.height =
+        Math.min(messageInput.scrollHeight, 150) + "px";
+    });
+
+    messageInput.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" && !event.shiftKey) {
+        event.preventDefault();
+        messageForm.requestSubmit();
+      }
+    });
+
+    $("newChatButton").addEventListener("click", () => {
+      const channel = window.prompt(
+        "Digite um canal existente: " + channelList.join(", "),
+        currentChannel
+      );
+
+      if (channel === null) return;
+
+      const normalized = channel.trim().toLowerCase();
+
+      if (channelList.includes(normalized)) {
+        joinChannel(normalized);
+      } else {
+        window.alert(
+          "Esse canal não existe. Escolha um dos canais disponíveis."
+        );
+      }
+    });
+
+    $("logoutButton").addEventListener("click", async () => {
+      try {
+        await api("/api/logout", { method: "POST", body: "{}" });
+      } catch (error) {
+        console.error("Erro ao sair:", error);
+      }
+
+      if (socket) socket.disconnect();
+      currentUser = null;
+      document.title = "NEXO — Conecte-se";
+      authForm.reset();
+      setMode("login");
+      showAuth("Você saiu da sua conta.");
+    });
+
+    async function initialize() {
+      try {
+        const status = await api("/api/status");
+        if (!status.ok) throw new Error("Servidor indisponível.");
+
+        const session = await api("/api/me");
+
+        if (session.authenticated && session.user) {
+          await enterChat(session.user);
+        } else {
+          showAuth();
+        }
+      } catch (error) {
+        showAuth(
+          "Não foi possível verificar sua sessão. Confira se o servidor NEXO está rodando."
+        );
+        console.error("Erro ao iniciar o NEXO:", error);
+      }
+    }
+
+    setMode("login");
+    initialize();
+  </script>
+</body>
+</html>
