@@ -518,6 +518,81 @@
     }
   }
 
+/* Janela de chamada de voz e vídeo */
+#callOverlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: rgba(3, 7, 18, 0.88);
+  backdrop-filter: blur(8px);
+}
+
+#callOverlay[hidden] {
+  display: none;
+}
+
+.call-card {
+  width: 100%;
+  max-width: 520px;
+  padding: 24px;
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  background: var(--panel);
+  color: var(--text);
+  text-align: center;
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.45);
+}
+
+#callStatus {
+  color: var(--muted);
+  margin-bottom: 20px;
+}
+
+#remoteVideo {
+  display: block;
+  width: 100%;
+  max-height: 320px;
+  object-fit: cover;
+  border-radius: 12px;
+  background: #05070d;
+}
+
+#localVideo {
+  display: block;
+  width: 120px;
+  max-height: 160px;
+  margin: 12px auto;
+  border-radius: 10px;
+  background: #05070d;
+  object-fit: cover;
+}
+
+#incomingCallActions,
+#activeCallActions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 10px;
+  margin-top: 18px;
+}
+
+#incomingCallActions[hidden],
+#activeCallActions[hidden] {
+  display: none;
+}
+
+#callOverlay button {
+  padding: 10px 16px;
+  border: 0;
+  border-radius: 10px;
+  cursor: pointer;
+  font-weight: 600;
+}
+
 </style>
 </head>
 <body>
@@ -592,41 +667,33 @@
       </aside>
 
       <main class="chat-main">
-        <header class="chat-header">
+         <header class="chat-header">
           <div class="channel-symbol">#</div>
+
           <div>
             <h2 id="channelTitle">geral</h2>
             <p id="channelDescription">Converse com a comunidade</p>
           </div>
-       
-<header class="chat-header">
-  <div class="channel-symbol">#</div>
 
-  <div>
-    <h2 id="channelTitle">geral</h2>
-    <p id="channelDescription">Converse com a comunidade</p>
-  </div>
+          <div class="connection" id="connectionStatus">
+            <span class="connection-dot"></span>
+            <span id="connectionText">Conectando...</span>
+          </div>
 
-  <div class="connection" id="connectionStatus">
-    <span class="connection-dot"></span>
-    <span id="connectionText">Conectando...</span>
-  </div>
+          <div class="call-controls">
+            <select id="callUserSelect">
+              <option value="">Escolha um usuário</option>
+            </select>
 
-  <div class="call-controls">
-    <select id="callUserSelect">
-      <option value="">Escolha um usuário</option>
-    </select>
+            <button id="voiceCallBtn" type="button">
+              📞 Chamada de voz
+            </button>
 
-    <button id="voiceCallBtn" type="button">
-      📞 Chamada de voz
-    </button>
-
-    <button id="videoCallBtn" type="button">
-      🎥 Chamada de vídeo
-    </button>
-  </div>
-</header>
-
+            <button id="videoCallBtn" type="button">
+              🎥 Chamada de vídeo
+            </button>
+          </div>
+        </header>
 
         <div class="notice error" id="chatNotice" role="status" aria-live="polite" hidden></div>
         <div class="messages" id="messages" aria-live="polite"></div>
@@ -676,12 +743,20 @@
     let sending = false;
     let renderedMessageIds = new Set();
 
+    // Controle das chamadas de voz e vídeo
+    let callPeerId = null;
+    let callPeerName = "";
+    let callMode = "audio";
+    let localStream = null;
+    let peerConnection = null;
+    let incomingCall = null;
+    let isMuted = false;
+
     function showNotice(element, message, type = "error") {
       element.textContent = message || "";
       element.className = "notice " + type;
       element.hidden = !message;
     }
-
     function hideNotice(element) {
       element.textContent = "";
       element.hidden = true;
@@ -1182,5 +1257,27 @@
 
     initialize();
   </script>
+
+  <!-- Janela de chamada de voz e vídeo -->
+  <div id="callOverlay" hidden>
+    <div class="call-card">
+      <h2 id="callTitle">Chamada</h2>
+      <p id="callStatus">Preparando chamada...</p>
+
+      <video id="remoteVideo" autoplay playsinline></video>
+      <video id="localVideo" autoplay playsinline muted></video>
+
+      <div id="incomingCallActions" hidden>
+        <button id="acceptCallBtn" type="button">Atender</button>
+        <button id="declineCallBtn" type="button">Recusar</button>
+      </div>
+
+      <div id="activeCallActions" hidden>
+        <button id="muteCallBtn" type="button">Silenciar microfone</button>
+        <button id="endCallBtn" type="button">Encerrar chamada</button>
+      </div>
+    </div>
+  </div>
+
 </body>
 </html>
