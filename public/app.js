@@ -6,802 +6,572 @@ const $ = (selector) => document.querySelector(selector);
 const authView = $("#authView");
 const appView = $("#appView");
 const authForm = $("#authForm");
-const authError = $("#authError");
-const messagesEl = $("#messages");
+const authTitle = $("#authTitle");
+const authDescription = $("#authDescription");
+const usernameInput = $("#username");
+const usernameLabel = $("#usernameLabel");
+const identifierInput = $("#identifier");
+const passwordInput = $("#password");
+const authSubmit = $("#authSubmit");
+const authMessage = $("#authMessage");
+const passwordHint = $("#passwordHint");
+const loginTab = $("#loginTab");
+const registerTab = $("#registerTab");
+
+const currentUsername = $("#currentUsername");
+const userAvatar = $("#userAvatar");
+const channelList = $("#channelList");
+const channelName = $("#channelName");
+const channelIcon = $("#channelIcon");
+const channelDescription = $("#channelDescription");
+const messages = $("#messages");
 const messageForm = $("#messageForm");
 const messageInput = $("#messageInput");
-const chatError = $("#chatError");
 const connectionBanner = $("#connectionBanner");
+const connectionDot = $("#connectionDot");
+const settingsPanel = $("#settingsPanel");
+const settingsMessage = $("#settingsMessage");
 
 let authMode = "login";
 let currentUser = null;
 let currentChannel = "geral";
 let socket = null;
-let toastTimer;
-let toastMessageTimer;
-let reconnecting = false;
+let joinedChannel = null;
+let messageCache = new Map();
+let channels = [];
+let isSending = false;
 
-const channelDescriptions = {
-  geral: "Um espaço para conversar e compartilhar ideias.",
-  jogos: "Converse sobre jogos e suas novidades.",
-  tecnologia: "Ideias, tecnologia e inovação.",
-  conversa: "Um lugar para conversas descontraídas."
+const channelInfo = {
+  geral: {
+    title: "geral",
+    description: "Converse com toda a comunidade.",
+    icon: "#"
+  },
+  jogos: {
+    title: "jogos",
+    description: "Jogos, partidas e tudo sobre games.",
+    icon: "🎮"
+  },
+  tecnologia: {
+    title: "tecnologia",
+    description: "Novidades, ideias e tecnologia.",
+    icon: "⌘"
+  },
+  conversa: {
+    title: "conversa",
+    description: "Um espaço para conversar à vontade.",
+    icon: "☕"
+  }
 };
 
-const defaultSettings = {
-  theme: "dark",
-  fontSize: "16",
-  sound: false
-};
-
-let settings = loadSettings();
-
-function loadSettings() {
-  try {
-    const saved = JSON.parse(localStorage.getItem("nexo-settings") || "{}");
-    return { ...defaultSettings, ...saved };
-  } catch {
-    return { ...defaultSettings };
-  }
-}
-
-function saveSettings() {
-  try {
-    localStorage.setItem("nexo-settings", JSON.stringify(settings));
-  } catch {
-    showToast("Não foi possível salvar as configurações.");
-  }
+function setMessage(element, text, type = "") {
+  if (!element) return;
+  element.textContent = text || "";
+  element.classList.remove("error", "success");
+  if (type) element.classList.add(type);
 }
 
 async function api(url, options = {}) {
-  let response;
+  const response = await fetch(url, {
+    credentials: "same-origin",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...(options.headers || {})
+    }
+  });
 
-  try {
-    response = await fetch(url, {
-      credentials: "same-origin",
-      ...options,
-      headers: {
-        ...(options.body ? { "Content-Type": "application/json" } : {}),
-        ...options.headers
-      }
-    });
-  } catch {
-    throw new Error(
-      "Não foi possível conectar ao servidor. Verifique sua conexão e tente novamente."
-    );
-  }
-
-  const contentType = response.headers.get("content-type") || "";
-  const data = contentType.includes("application/json")
-    ? await response.json().catch(() => ({}))
-    : {};
+  const data = await response.json().catch(() => ({}));
 
   if (!response.ok) {
-    throw new Error(
-      data.error ||
-      `Erro ${response.status}: não foi possível completar a solicitação.`
-    );
+    throw new Error(data.error || data.message || "Não foi possível concluir a operação.");
   }
 
   return data;
 }
 
-function showToast(message) {
-  const toast = $("#toast");
+function setAuthMode(mode) {
+  authMode = mode;
+  const registering = mode === "register";
 
-  if (!toast) {
-    console.info(message);
-    return;
-  }
+  loginTab.classList.toggle("active", !registering);
+  registerTab.classList.toggle("active", registering);
 
-  toast.textContent = String(message);
-  toast.classList.add("show");
+  authTitle.textContent = registering ? "Crie sua conta" : "Bem-vindo de volta";
+  authDescription.textContent = registering
+    ? "Entre para fazer parte da comunidade."
+    : "Entre para continuar suas conversas.";
 
-  clearTimeout(toastTimer);
+  usernameInput.hidden = !registering;
+  usernameLabel.hidden = !registering;
+  usernameInput.required = registering;
+  identifierInput.autocomplete = registering ? "email" : "username";
+  identifierInput.placeholder = registering
+    ? "Seu e-mail"
+    : "Digite seu usuário ou e-mail";
 
-  toastTimer = setTimeout(() => {
-    toast.classList.remove("show");
-  }, 2800);
+  authSubmit.textContent = registering ? "Criar conta" : "Entrar";
+  passwordInput.autocomplete = registering ? "new-password" : "current-password";
+  passwordHint.hidden = !registering;
+  setMessage(authMessage, "");
 }
 
-function showAuthError(message) {
-  if (authError) authError.textContent = message;
-}
-
-function showChatError(message) {
-  if (chatError) chatError.textContent = message;
-  else if (message) showToast(message);
-}
-
-function setConnectionStatus(connected) {
-  if (!connectionBanner) return;
-
-  connectionBanner.classList.toggle("hidden", connected);
-  connectionBanner.textContent = connected
-    ? ""
-    : "Reconectando ao servidor...";
-}
+loginTab.addEventListener("click", () => setAuthMode("login"));
+registerTab.addEventListener("click", () => setAuthMode("register"));
 
 function validatePassword(password) {
-  if (password.length < 6) {
-    return "A senha deve ter pelo menos 6 caracteres.";
+  if (password.length < 8) {
+    return "A senha deve ter pelo menos 8 caracteres.";
   }
-
-  if (new TextEncoder().encode(password).length > 72) {
-    return "A senha não pode ultrapassar 72 bytes.";
-  }
-
-  if (!/[A-Z]/.test(password)) {
-    return "Inclua pelo menos uma letra maiúscula.";
-  }
-
   if (!/[a-z]/.test(password)) {
     return "Inclua pelo menos uma letra minúscula.";
   }
-
+  if (!/[A-Z]/.test(password)) {
+    return "Inclua pelo menos uma letra maiúscula.";
+  }
   if (!/[0-9]/.test(password)) {
     return "Inclua pelo menos um número.";
   }
-
   if (!/[^A-Za-z0-9]/.test(password)) {
-    return "Inclua pelo menos um símbolo, como @, # ou !.";
+    return "Inclua pelo menos um símbolo.";
   }
-
   return "";
 }
 
-function setAuthMode(mode) {
-  authMode = mode === "register" ? "register" : "login";
+authForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  setMessage(authMessage, "");
 
-  const registering = authMode === "register";
-  const loginTab = $("#loginTab");
-  const registerTab = $("#registerTab");
-  const username = $("#username");
-  const usernameLabel = $("#usernameLabel");
-  const identifier = $("#identifier");
-  const password = $("#password");
-  const passwordHint = $("#passwordHint");
-  const submitButton = $("#authSubmit");
+  const identifier = identifierInput.value.trim();
+  const password = passwordInput.value;
 
-  loginTab?.classList.toggle("active", !registering);
-  registerTab?.classList.toggle("active", registering);
-
-  loginTab?.setAttribute("aria-selected", String(!registering));
-  registerTab?.setAttribute("aria-selected", String(registering));
-
-  if (username) {
-    username.classList.toggle("hidden", !registering);
-    username.required = registering;
-    username.autocomplete = "username";
+  if (!identifier || !password) {
+    setMessage(authMessage, "Preencha os campos obrigatórios.", "error");
+    return;
   }
 
-  usernameLabel?.classList.toggle("hidden", !registering);
+  if (authMode === "register") {
+    const username = usernameInput.value.trim();
 
-  if (identifier) {
-    identifier.placeholder = registering
-      ? "voce@exemplo.com"
-      : "E-mail ou usuário";
+    if (!/^[a-zA-Z0-9_]{3,24}$/.test(username)) {
+      setMessage(
+        authMessage,
+        "O usuário deve ter de 3 a 24 caracteres: letras, números ou _.",
+        "error"
+      );
+      return;
+    }
 
-    identifier.autocomplete = registering ? "email" : "username";
+    const passwordError = validatePassword(password);
+    if (passwordError) {
+      setMessage(authMessage, passwordError, "error");
+      return;
+    }
   }
 
-  if (password) {
-    password.autocomplete = registering
-      ? "new-password"
-      : "current-password";
+  authSubmit.disabled = true;
+  authSubmit.textContent = "Aguarde...";
 
-    password.minLength = registering ? 6 : 1;
-    password.maxLength = 72;
+  try {
+    let result;
+
+    if (authMode === "register") {
+      result = await api("/api/register", {
+        method: "POST",
+        body: JSON.stringify({
+          username: usernameInput.value.trim(),
+          email: identifier,
+          password
+        })
+      });
+    } else {
+      result = await api("/api/login", {
+        method: "POST",
+        body: JSON.stringify({ identifier, password })
+      });
+    }
+
+    await enterApp(result.user);
+  } catch (error) {
+    setMessage(authMessage, error.message, "error");
+  } finally {
+    authSubmit.disabled = false;
+    authSubmit.textContent = authMode === "register" ? "Criar conta" : "Entrar";
   }
+});
 
-  if (passwordHint) {
-    passwordHint.textContent = registering
-      ? "Mínimo de 6 caracteres, com maiúscula, minúscula, número e símbolo."
-      : "";
+async function restoreSession() {
+  try {
+    const data = await api("/api/me");
+    if (data.authenticated && data.user) {
+      await enterApp(data.user);
+    } else {
+      showAuth();
+    }
+  } catch {
+    showAuth();
   }
-
-  if (submitButton) {
-    submitButton.textContent = registering
-      ? "Criar minha conta"
-      : "Entrar no NEXO";
-
-    submitButton.disabled = false;
-  }
-
-  showAuthError("");
 }
 
-function setupAuthTabs() {
-  $("#loginTab")?.addEventListener("click", (event) => {
-    event.preventDefault();
-    setAuthMode("login");
-  });
-
-  $("#registerTab")?.addEventListener("click", (event) => {
-    event.preventDefault();
-    setAuthMode("register");
-  });
+function showAuth() {
+  authView.hidden = false;
+  appView.hidden = true;
+  settingsPanel.hidden = true;
 }
 
-function showApplication(user) {
+async function enterApp(user) {
+  if (!user) {
+    showAuth();
+    return;
+  }
+
   currentUser = user;
+  authView.hidden = true;
+  appView.hidden = false;
 
-  authView?.classList.add("hidden");
-  appView?.classList.remove("hidden");
+  const name = user.username || user.name || user.email || "Usuário";
+  currentUsername.textContent = name;
+  userAvatar.textContent = name.charAt(0).toUpperCase();
 
-  const displayName =
-    user.username ||
-    user.name ||
-    user.email ||
-    "Usuário";
-
-  const nameElement = $("#currentUsername");
-  const avatarElement = $("#userAvatar");
-  const emailElement = $("#currentUserEmail");
-
-  if (nameElement) nameElement.textContent = displayName;
-  if (emailElement) emailElement.textContent = user.email || "";
-
-  if (avatarElement) {
-    avatarElement.textContent = displayName.charAt(0).toUpperCase();
-  }
-
-  applySettings();
+  await loadChannels();
   connectSocket();
-  loadChannels();
 }
 
-function showAuthentication() {
-  currentUser = null;
+async function loadChannels() {
+  try {
+    const data = await api("/api/channels");
+    channels = Array.isArray(data) ? data : (data.channels || []);
 
+    if (!channels.length) channels = ["geral"];
+
+    if (!channels.includes(currentChannel)) currentChannel = channels[0];
+
+    renderChannels();
+    updateChannelHeader();
+  } catch (error) {
+    channelList.replaceChildren();
+    const item = document.createElement("p");
+    item.className = "muted";
+    item.textContent = error.message;
+    channelList.append(item);
+  }
+}
+
+function renderChannels() {
+  channelList.replaceChildren();
+
+  channels.forEach((channel) => {
+    const info = channelInfo[channel] || {
+      title: channel,
+      description: "Converse neste canal.",
+      icon: "#"
+    };
+
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "channel-button";
+    button.classList.toggle("active", channel === currentChannel);
+    button.setAttribute("aria-current", channel === currentChannel ? "page" : "false");
+
+    const icon = document.createElement("span");
+    icon.className = "channel-hash";
+    icon.textContent = info.icon;
+
+    const label = document.createElement("span");
+    label.className = "channel-label";
+    label.textContent = info.title;
+
+    button.append(icon, label);
+    button.addEventListener("click", () => selectChannel(channel));
+    channelList.append(button);
+  });
+}
+
+function updateChannelHeader() {
+  const info = channelInfo[currentChannel] || {
+    title: currentChannel,
+    description: "Converse neste canal.",
+    icon: "#"
+  };
+
+  channelName.textContent = info.title;
+  channelIcon.textContent = info.icon;
+  channelDescription.textContent = info.description;
+}
+
+function selectChannel(channel) {
+  if (!channels.includes(channel) || channel === currentChannel) return;
+
+  currentChannel = channel;
+  renderChannels();
+  updateChannelHeader();
+  renderCurrentMessages();
+
+  if (socket && socket.connected) {
+    joinedChannel = null;
+    socket.emit("join channel", channel);
+  }
+}
+
+function connectSocket() {
   if (socket) {
     socket.disconnect();
     socket = null;
   }
 
-  appView?.classList.add("hidden");
-  authView?.classList.remove("hidden");
-
-  if (authForm) authForm.reset();
-
-  setAuthMode("login");
-}
-
-function setupAuthForm() {
-  if (!authForm) {
-    console.error("NEXO: não encontrei o formulário #authForm.");
-    return;
-  }
-
-  authForm.addEventListener("submit", async (event) => {
-    event.preventDefault();
-    showAuthError("");
-
-    const button = $("#authSubmit");
-    const identifier = $("#identifier")?.value.trim() || "";
-    const password = $("#password")?.value || "";
-    const username = $("#username")?.value.trim() || "";
-
-    if (authMode === "register") {
-      if (!/^[a-zA-Z0-9_]{3,24}$/.test(username)) {
-        showAuthError(
-          "O nome deve ter de 3 a 24 caracteres: letras, números ou _."
-        );
-        return;
-      }
-
-      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(identifier)) {
-        showAuthError("Digite um e-mail válido.");
-        return;
-      }
-
-      const passwordError = validatePassword(password);
-
-      if (passwordError) {
-        showAuthError(passwordError);
-        return;
-      }
-    }
-
-    if (!identifier || !password) {
-      showAuthError("Preencha o e-mail/usuário e a senha.");
-      return;
-    }
-
-    if (button) {
-      button.disabled = true;
-      button.textContent = "Aguarde...";
-    }
-
-    try {
-      let result;
-
-      if (authMode === "register") {
-        result = await api("/api/register", {
-          method: "POST",
-          body: JSON.stringify({
-            username,
-            email: identifier,
-            password
-          })
-        });
-      } else {
-        result = await api("/api/login", {
-          method: "POST",
-          body: JSON.stringify({
-            identifier,
-            email: identifier,
-            username: identifier,
-            password
-          })
-        });
-      }
-
-      const user = result.user || result;
-
-      if (!user || (!user.username && !user.email && !user.id)) {
-        const me = await api("/api/me");
-        showApplication(me.user || me);
-      } else {
-        showApplication(user);
-      }
-
-      showToast(
-        authMode === "register"
-          ? "Conta criada com sucesso!"
-          : "Login realizado com sucesso!"
-      );
-    } catch (error) {
-      showAuthError(error.message || "Não foi possível entrar.");
-    } finally {
-      if (button) {
-        button.disabled = false;
-        button.textContent =
-          authMode === "register"
-            ? "Criar minha conta"
-            : "Entrar no NEXO";
-      }
-    }
-  });
-}
-
-function connectSocket() {
-  if (typeof window.io !== "function") {
-    setConnectionStatus(false);
-    showChatError(
-      "Socket.IO não foi carregado. Verifique se o servidor disponibiliza /socket.io/socket.io.js."
-    );
-    return;
-  }
-
-  if (socket) socket.disconnect();
-
-  socket = window.io({
-    reconnection: true,
-    reconnectionAttempts: Infinity,
-    reconnectionDelay: 1000,
-    reconnectionDelayMax: 5000
-  });
+  joinedChannel = null;
+  socket = io({ withCredentials: true });
 
   socket.on("connect", () => {
-    reconnecting = false;
-    setConnectionStatus(true);
+    connectionBanner.textContent = "Conectado";
+    connectionDot.style.background = "var(--success)";
+    joinedChannel = null;
     socket.emit("join channel", currentChannel);
   });
 
   socket.on("disconnect", () => {
-    reconnecting = true;
-    setConnectionStatus(false);
+    connectionBanner.textContent = "Reconectando...";
+    connectionDot.style.background = "var(--danger)";
+    joinedChannel = null;
   });
 
   socket.on("connect_error", () => {
-    setConnectionStatus(false);
+    connectionBanner.textContent = "Falha na conexão";
+    connectionDot.style.background = "var(--danger)";
+  });
+
+  socket.on("channel joined", (data) => {
+    const channel = typeof data === "string" ? data : data?.channel;
+    if (channel) joinedChannel = channel;
   });
 
   socket.on("chat history", (history) => {
-    renderMessages(Array.isArray(history) ? history : []);
+    if (!Array.isArray(history)) return;
+
+    const channel = history[0]?.channel || joinedChannel || currentChannel;
+    messageCache.set(channel, history.slice());
+    if (channel === currentChannel) renderCurrentMessages();
   });
 
   socket.on("chat message", (message) => {
-    if (!message || typeof message !== "object") return;
-    appendMessage(message);
-  });
+    if (!message || !message.channel) return;
 
-  socket.on("chat error", (error) => {
-    const message =
-      typeof error === "string"
-        ? error
-        : error?.message || "Não foi possível enviar a mensagem.";
+    const existing = messageCache.get(message.channel) || [];
+    if (message.id && existing.some((item) => item.id === message.id)) return;
 
-    showChatError(message);
-  });
-}
+    existing.push(message);
+    messageCache.set(message.channel, existing.slice(-500));
 
-async function loadChannels() {
-  try {
-    const result = await api("/api/channels");
-    const channels = Array.isArray(result)
-      ? result
-      : Array.isArray(result.channels)
-        ? result.channels
-        : [];
-
-    if (channels.length) {
-      renderChannels(channels);
-    } else {
-      renderChannels(
-        Object.keys(channelDescriptions).map((name) => ({
-          name,
-          description: channelDescriptions[name]
-        }))
-      );
+    if (message.channel === currentChannel) {
+      const welcome = messages.querySelector(".welcome-message");
+      if (welcome) welcome.remove();
+      renderMessage(message);
+      messages.scrollTop = messages.scrollHeight;
     }
-  } catch (error) {
-    console.warn("NEXO: não foi possível carregar os canais.", error);
-    renderChannels(
-      Object.keys(channelDescriptions).map((name) => ({
-        name,
-        description: channelDescriptions[name]
-      }))
-    );
-  }
-}
+  });
 
-function normalizeChannel(channel) {
-  if (typeof channel === "string") {
-    return {
-      name: channel.replace(/^#/, ""),
-      description: channelDescriptions[channel] || ""
-    };
-  }
-
-  const name = channel?.name || channel?.slug || channel?.id || "geral";
-
-  return {
-    name: String(name).replace(/^#/, ""),
-    description:
-      channel?.description ||
-      channelDescriptions[String(name).replace(/^#/, "")] ||
-      ""
-  };
-}
-
-function renderChannels(channels) {
-  const container =
-    $("#channelList") ||
-    $("#channels") ||
-    $(".channel-list");
-
-  if (!container) return;
-
-  container.replaceChildren();
-
-  channels.forEach((rawChannel) => {
-    const channel = normalizeChannel(rawChannel);
-    const button = document.createElement("button");
-
-    button.type = "button";
-    button.className = "channel-btn";
-    button.classList.toggle(
-      "active",
-      channel.name === currentChannel
-    );
-    button.title = channel.description || `Canal ${channel.name}`;
-
-    const icon = document.createElement("span");
-    icon.className = "channel-icon channel-hash";
-    icon.textContent = "#";
-    icon.setAttribute("aria-hidden", "true");
-
-    const name = document.createElement("span");
-    name.className = "channel-name";
-    name.textContent = channel.name;
-
-    button.append(icon, name);
-
-    button.addEventListener("click", () => {
-      joinChannel(channel.name);
-    });
-
-    container.appendChild(button);
+  socket.on("error message", (data) => {
+    const message = typeof data === "string" ? data : data?.error;
+    if (message) connectionBanner.textContent = message;
   });
 }
 
-function joinChannel(channelName) {
-  const safeName = String(channelName || "")
-    .replace(/^#/, "")
-    .trim();
+function renderCurrentMessages() {
+  messages.replaceChildren();
 
-  if (!/^[a-zA-Z0-9_-]{1,40}$/.test(safeName)) {
-    showToast("Nome de canal inválido.");
+  const history = messageCache.get(currentChannel) || [];
+  if (!history.length) {
+    const welcome = document.createElement("div");
+    welcome.className = "welcome-message";
+
+    const icon = document.createElement("div");
+    icon.className = "welcome-icon";
+    icon.textContent = "✦";
+
+    const title = document.createElement("h2");
+    title.textContent = `Bem-vindo ao canal ${currentChannel}`;
+
+    const description = document.createElement("p");
+    description.textContent = "Envie a primeira mensagem para começar a conversa.";
+
+    welcome.append(icon, title, description);
+    messages.append(welcome);
     return;
   }
 
-  currentChannel = safeName;
-
-  const title = $("#channelTitle");
-  const description = $("#channelDescription");
-
-  if (title) title.textContent = `# ${safeName}`;
-  if (description) {
-    description.textContent =
-      channelDescriptions[safeName] || "Conversa do canal.";
-  }
-
-  document
-    .querySelectorAll(".channel-btn")
-    .forEach((button) => {
-      button.classList.toggle(
-        "active",
-        button.querySelector(".channel-name")?.textContent === safeName
-      );
-    });
-
-  if (messagesEl) messagesEl.replaceChildren();
-  showChatError("");
-
-  if (socket?.connected) {
-    socket.emit("join channel", safeName);
-  }
+  history.forEach(renderMessage);
+  messages.scrollTop = messages.scrollHeight;
 }
 
-function renderMessages(messages) {
-  if (!messagesEl) return;
+function renderMessage(message) {
+  if (!message || message.channel !== currentChannel) return;
 
-  messagesEl.replaceChildren();
+  const row = document.createElement("article");
+  row.className = "message";
 
-  messages.forEach((message) => appendMessage(message, false));
+  const username = message.username || "Usuário";
+  const avatar = document.createElement("div");
+  avatar.className = "message-avatar";
+  avatar.textContent = username.charAt(0).toUpperCase();
 
-  scrollToBottom();
-}
+  const body = document.createElement("div");
+  body.className = "message-body";
 
-function appendMessage(message, shouldScroll = true) {
-  if (!messagesEl) return;
+  const meta = document.createElement("div");
+  meta.className = "message-meta";
 
-  const wrapper = document.createElement("article");
-  wrapper.className = "message";
-
-  const author = document.createElement("div");
-  author.className = "message-author";
-
-  const authorName = document.createElement("span");
-  authorName.className = "message-username";
-  authorName.textContent =
-    message.username ||
-    message.user?.username ||
-    message.author ||
-    "Usuário";
+  const name = document.createElement("strong");
+  name.textContent = username;
 
   const time = document.createElement("time");
-  time.className = "message-time";
-
-  const rawDate = message.createdAt || message.timestamp || message.date;
-  const date = rawDate ? new Date(rawDate) : new Date();
-
-  if (!Number.isNaN(date.getTime())) {
-    time.dateTime = date.toISOString();
-    time.textContent = date.toLocaleTimeString("pt-BR", {
-      hour: "2-digit",
-      minute: "2-digit"
-    });
+  if (message.created_at) {
+    const date = new Date(message.created_at);
+    if (!Number.isNaN(date.getTime())) {
+      time.dateTime = date.toISOString();
+      time.textContent = date.toLocaleString("pt-BR", {
+        hour: "2-digit",
+        minute: "2-digit",
+        day: "2-digit",
+        month: "short"
+      });
+    }
   }
 
-  author.append(authorName, time);
+  const text = document.createElement("div");
+  text.className = "message-text";
+  text.textContent = message.message || "";
 
-  const content = document.createElement("div");
-  content.className = "message-content";
-  content.textContent = String(message.content ?? message.text ?? "");
-
-  wrapper.append(author, content);
-  messagesEl.appendChild(wrapper);
-
-  if (shouldScroll) scrollToBottom();
+  meta.append(name, time);
+  body.append(meta, text);
+  row.append(avatar, body);
+  messages.append(row);
 }
 
-function scrollToBottom() {
-  if (!messagesEl) return;
+messageForm.addEventListener("submit", (event) => {
+  event.preventDefault();
 
-  requestAnimationFrame(() => {
-    messagesEl.scrollTop = messagesEl.scrollHeight;
-  });
-}
+  const message = messageInput.value.trim();
+  if (!message || !socket || !socket.connected || isSending) return;
 
-function setupMessageForm() {
-  if (!messageForm) return;
-
-  messageForm.addEventListener("submit", (event) => {
-    event.preventDefault();
-
-    const content = messageInput?.value.trim() || "";
-
-    if (!content) return;
-
-    if (content.length > 2000) {
-      showChatError("A mensagem não pode ultrapassar 2.000 caracteres.");
-      return;
+  isSending = true;
+  socket.emit("send message", {
+    channel: currentChannel,
+    message
+  }, (response) => {
+    isSending = false;
+    if (response?.error) {
+      connectionBanner.textContent = response.error;
     }
-
-    if (!socket?.connected) {
-      showChatError("Você está desconectado. Aguarde a reconexão.");
-      return;
-    }
-
-    socket.emit("send message", {
-      channel: currentChannel,
-      content
-    });
-
-    messageInput.value = "";
-    messageInput.focus();
-    showChatError("");
   });
-}
 
-async function logout() {
+  messageInput.value = "";
+  messageInput.focus();
+  isSending = false;
+});
+
+$("#emojiButton").addEventListener("click", () => {
+  const emojis = ["😀", "😂", "❤️", "👍", "🔥", "🎮", "✨", "👋"];
+  const emoji = emojis[Math.floor(Math.random() * emojis.length)];
+  const start = messageInput.selectionStart ?? messageInput.value.length;
+  const end = messageInput.selectionEnd ?? messageInput.value.length;
+  messageInput.setRangeText(emoji, start, end, "end");
+  messageInput.focus();
+});
+
+$("#logoutButton").addEventListener("click", async () => {
   try {
-    await api("/api/logout", { method: "POST" });
-  } catch (error) {
-    console.warn("NEXO: erro ao encerrar sessão.", error);
-  } finally {
-    showAuthentication();
-    showToast("Você saiu da sua conta.");
-  }
-}
-
-function setupLogout() {
-  const logoutButton =
-    $("#logoutButton") ||
-    $("#logoutBtn") ||
-    $("#logout");
-
-  logoutButton?.addEventListener("click", logout);
-}
-
-function applySettings() {
-  const root = document.documentElement;
-
-  root.dataset.theme = settings.theme;
-  document.body?.classList.toggle("light", settings.theme === "light");
-  document.body?.classList.toggle("midnight", settings.theme === "midnight");
-
-  root.style.setProperty(
-    "--font-size",
-    `${Number(settings.fontSize) || 16}px`
-  );
-
-  const themeSelect = $("#themeSelect");
-  const fontSizeSelect = $("#fontSizeSelect");
-  const soundToggle = $("#soundToggle");
-
-  if (themeSelect) themeSelect.value = settings.theme;
-  if (fontSizeSelect) fontSizeSelect.value = String(settings.fontSize);
-  if (soundToggle) soundToggle.checked = Boolean(settings.sound);
-}
-
-function setupSettings() {
-  $("#themeSelect")?.addEventListener("change", (event) => {
-    const allowed = ["dark", "light", "midnight"];
-    const theme = event.target.value;
-
-    settings.theme = allowed.includes(theme) ? theme : "dark";
-    saveSettings();
-    applySettings();
-  });
-
-  $("#fontSizeSelect")?.addEventListener("change", (event) => {
-    const size = Number(event.target.value);
-
-    settings.fontSize = [14, 16, 18, 20].includes(size) ? size : 16;
-    saveSettings();
-    applySettings();
-  });
-
-  $("#soundToggle")?.addEventListener("change", (event) => {
-    settings.sound = Boolean(event.target.checked);
-    saveSettings();
-  });
-
-  const settingsButton =
-    $("#settingsButton") ||
-    $("#settingsBtn");
-
-  const settingsPanel =
-    $("#settingsPanel") ||
-    $("#settingsModal");
-
-  settingsButton?.addEventListener("click", () => {
-    if (!settingsPanel) {
-      showToast("Painel de configurações não encontrado.");
-      return;
-    }
-
-    settingsPanel.classList.toggle("hidden");
-    settingsPanel.setAttribute(
-      "aria-hidden",
-      String(settingsPanel.classList.contains("hidden"))
-    );
-  });
-
-  $("#closeSettings")?.addEventListener("click", () => {
-    settingsPanel?.classList.add("hidden");
-    settingsPanel?.setAttribute("aria-hidden", "true");
-  });
-
-  applySettings();
-}
-
-function setupMessageInput() {
-  if (!messageInput) return;
-
-  messageInput.addEventListener("input", () => {
-    if (messageInput.value.length > 2000) {
-      messageInput.value = messageInput.value.slice(0, 2000);
-    }
-  });
-
-  messageInput.addEventListener("keydown", (event) => {
-    if (
-      event.key === "Enter" &&
-      !event.shiftKey &&
-      !event.isComposing
-    ) {
-      event.preventDefault();
-      messageForm?.requestSubmit();
-    }
-  });
-}
-
-async function restoreSession() {
-  try {
-    const result = await api("/api/me");
-    const user = result.user || result;
-
-    if (user && (user.username || user.email || user.id)) {
-      showApplication(user);
-    } else {
-      showAuthentication();
-    }
+    await api("/api/logout", { method: "POST", body: JSON.stringify({}) });
   } catch {
-    showAuthentication();
+    // Mesmo se a resposta falhar, volta para a tela de login.
+  }
+
+  if (socket) socket.disconnect();
+  socket = null;
+  currentUser = null;
+  messageCache.clear();
+  showAuth();
+  authForm.reset();
+  setAuthMode("login");
+});
+
+$("#settingsButton").addEventListener("click", () => {
+  settingsPanel.hidden = !settingsPanel.hidden;
+});
+
+$("#closeSettings").addEventListener("click", () => {
+  settingsPanel.hidden = true;
+});
+
+$("#closeRightPanel").addEventListener("click", () => {
+  settingsPanel.hidden = true;
+});
+
+function applySettings(settings) {
+  const theme = settings.theme || "dark";
+  const accent = settings.accent || "#8b5cf6";
+  const fontSize = settings.fontSize || "medium";
+  const font = settings.font || "inter";
+
+  document.body.classList.toggle("theme-light", theme === "light");
+
+  ["font-small", "font-medium", "font-large",
+    "font-inter", "font-arial", "font-georgia", "font-mono"]
+    .forEach((className) => document.body.classList.remove(className));
+
+  document.body.classList.add(`font-${fontSize}`, `font-${font}`);
+  document.documentElement.style.setProperty("--accent", accent);
+
+  const darker = accent;
+  document.documentElement.style.setProperty("--accent-hover", darker);
+
+  $("#themeSelect").value = theme;
+  $("#accentColor").value = accent;
+  $("#fontSize").value = fontSize;
+  $("#fontSelect").value = font;
+}
+
+function readSettings() {
+  return {
+    theme: $("#themeSelect").value,
+    accent: $("#accentColor").value,
+    fontSize: $("#fontSize").value,
+    font: $("#fontSelect").value
+  };
+}
+
+function loadSettings() {
+  try {
+    const saved = JSON.parse(localStorage.getItem("nexo-settings") || "{}");
+    applySettings(saved);
+  } catch {
+    applySettings({});
   }
 }
 
-function setupNavigation() {
-  const toggleButton =
-    $("#sidebarToggle") ||
-    $("#menuButton");
+$("#saveSettings").addEventListener("click", () => {
+  const settings = readSettings();
 
-  const sidebar = $("#sidebar");
+  try {
+    localStorage.setItem("nexo-settings", JSON.stringify(settings));
+    applySettings(settings);
+    setMessage(settingsMessage, "Configurações salvas!", "success");
+  } catch {
+    setMessage(settingsMessage, "Não foi possível salvar as configurações.", "error");
+  }
+});
 
-  toggleButton?.addEventListener("click", () => {
-    sidebar?.classList.toggle("open");
-  });
+$("#themeShortcut").addEventListener("click", () => {
+  const settings = readSettings();
+  settings.theme = settings.theme === "dark" ? "light" : "dark";
+  $("#themeSelect").value = settings.theme;
+  applySettings(settings);
 
-  document.addEventListener("click", (event) => {
-    if (
-      sidebar?.classList.contains("open") &&
-      !sidebar.contains(event.target) &&
-      !toggleButton?.contains(event.target)
-    ) {
-      sidebar.classList.remove("open");
-    }
-  });
-}
+  try {
+    localStorage.setItem("nexo-settings", JSON.stringify(settings));
+  } catch {
+    // A alteração continua aplicada até a página ser recarregada.
+  }
+});
 
-function initialize() {
-  setupAuthTabs();
-  setupAuthForm();
-  setupMessageForm();
-  setupMessageInput();
-  setupLogout();
-  setupSettings();
-  setupNavigation();
-  setAuthMode("login");
-  restoreSession();
-}
-
-if (document.readyState === "loading") {
-  document.addEventListener("DOMContentLoaded", initialize, { once: true });
-} else {
-  initialize();
-}
+loadSettings();
+restoreSession();
