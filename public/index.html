@@ -1057,6 +1057,25 @@
       socket.on("error message", (payload) => {
         showNotice(chatNotice, payload?.error || "O servidor informou um erro no chat.");
       });
+            // Lista os usuários que estão online
+      socket.on("online users", (users) => {
+        const list = Array.isArray(users) ? users : (users?.users || []);
+        const select = document.getElementById("callUserSelect");
+
+        if (!select) return;
+
+        select.innerHTML = '<option value="">Escolha um usuário</option>';
+
+        list.forEach((user) => {
+          if (!user || user.id == null) return;
+          if (String(user.id) === String(currentUser?.id)) return;
+
+          const option = document.createElement("option");
+          option.value = user.id;
+          option.textContent = user.username || "Usuário";
+          select.appendChild(option);
+        });
+      });
     }
 
     messageForm.addEventListener("submit", (event) => {
