@@ -3,11 +3,13 @@
 
 /* ========================================
    NEXO CHAT — APP.JS
-   Login, cadastro, senhas, chat e canais
+   Login, cadastro, confirmação de senha,
+   chat, canais e configurações
 ======================================== */
 
 (() => {
   const $ = (selector) => document.querySelector(selector);
+  const $all = (selector) => Array.from(document.querySelectorAll(selector));
 
   const socket = typeof window.io === "function" ? window.io() : null;
 
@@ -19,7 +21,7 @@
     authSubmit: $("#authSubmit"),
     authMessage: $("#authMessage"),
 
-    usernameGroup: $("#usernameGroup"),
+    usernameGroup: $("#usernameGroup") || $("#username")?.parentElement,
     username: $("#username"),
 
     identifier: $("#identifier"),
@@ -58,22 +60,26 @@
   let authBusy = false;
   let sendingMessage = false;
   let settingsOpen = false;
-
-  const $all = (selector) => Array.from(document.querySelectorAll(selector));
+  let sendTimeout = null;
 
   /* ========================================
      UTILITÁRIOS
   ======================================== */
 
-  function setText(element, text) {
-    if (element) element.textContent = text;
+  function setText(element, value) {
+    if (element) element.textContent = value;
   }
 
-  function setMessage(element, text, type = "") {
+  function setMessage(element, value, type = "") {
     if (!element) return;
 
-    element.textContent = text;
-    element.classList.remove("error", "success", "invalid", "valid");
+    element.textContent = value;
+    element.classList.remove(
+      "error",
+      "success",
+      "invalid",
+      "valid"
+    );
 
     if (type) element.classList.add(type);
 
@@ -89,7 +95,9 @@
       credentials: "same-origin",
       ...options,
       headers: {
-        ...(options.body ? { "Content-Type": "application/json" } : {}),
+        ...(options.body
+          ? { "Content-Type": "application/json" }
+          : {}),
         ...(options.headers || {}),
       },
     });
@@ -97,7 +105,9 @@
     const data = await response.json().catch(() => ({}));
 
     if (!response.ok) {
-      throw new Error(data.error || data.message || "Ocorreu um erro.");
+      throw new Error(
+        data.error || data.message || "Ocorreu um erro."
+      );
     }
 
     return data;
@@ -113,10 +123,6 @@
     }
   }
 
-  function escapeText(value) {
-    return String(value ?? "");
-  }
-
   function formatTime(value) {
     if (!value) return "";
 
@@ -130,134 +136,51 @@
     });
   }
 
-  function formatChannelName(channel) {
-    return channel.charAt(0).toUpperCase() + channel.slice(1);
-  }
-
   /* ========================================
-     LOGIN E CADASTRO
+     SENHAS: MOSTRAR E OCULTAR
   ======================================== */
-
-  function setAuthMode(isRegistering) {
-    registering = Boolean(isRegistering);
-
-    const usernameGroup = elements.usernameGroup;
-    const username = elements.username;
-    const identifierLabel = elements.identifierLabel;
-    const identifier = elements.identifier;
-    const passwordHint = elements.passwordHint;
-    const confirmGroup = elements.confirmPasswordGroup;
-    const submit = elements.authSubmit;
-
-    if (usernameGroup) {
-      usernameGroup.hidden = !registering;
-    } else if (username) {
-      username.hidden = !registering;
-    }
-
-    if (username) {
-      username.required = registering;
-    }
-
-    if (identifierLabel) {
-      identifierLabel.textContent = registering ? "E-mail" : "E-mail ou usuário";
-    }
-
-    if (identifier) {
-      identifier.placeholder = registering
-        ? "seu@email.com"
-        : "Digite seu e-mail ou usuário";
-
-      identifier.autocomplete = registering ? "email" : "username";
-      identifier.type = registering ? "email" : "text";
-    }
-
-    if (passwordHint) {
-      passwordHint.hidden = !registering;
-    }
-
-    if (confirmGroup) {
-      confirmGroup.hidden = !registering;
-    }
-
-    if (elements.confirmPassword) {
-      elements.confirmPassword.required = registering;
-    }
-
-    if (submit) {
-      submit.textContent = registering ? "Criar conta" : "Entrar";
-    }
-
-    $all("[data-auth-mode-title]").forEach((element) => {
-      element.textContent = registering ? "Criar sua conta" : "Bem-vindo de volta";
-    });
-
-    $all("[data-auth-mode-description]").forEach((element) => {
-      element.textContent = registering
-        ? "Preencha os dados para começar a conversar."
-        : "Entre na sua conta para continuar.";
-    });
-
-    $all("[data-auth-mode-toggle]").forEach((button) => {
-      button.textContent = registering
-        ? "Já tenho uma conta"
-        : "Criar uma conta";
-    });
-
-    resetPasswordVisibility();
-    setMessage(elements.authMessage, "");
-    setMessage(elements.confirmPasswordMessage, "");
-
-    if (elements.password) elements.password.value = "";
-    if (elements.confirmPassword) elements.confirmPassword.value = "";
-
-    updatePasswordConfirmation();
-  }
-
-  function toggleAuthMode() {
-    setAuthMode(!registering);
-  }
-
-  function resetPasswordVisibility() {
-    if (elements.password) {
-      elements.password.type = "password";
-    }
-
-    if (elements.confirmPassword) {
-      elements.confirmPassword.type = "password";
-    }
-
-    if (elements.togglePassword) {
-      elements.togglePassword.textContent = "Mostrar";
-      elements.togglePassword.setAttribute("aria-label", "Mostrar senha");
-      elements.togglePassword.setAttribute("aria-pressed", "false");
-    }
-
-    if (elements.toggleConfirmPassword) {
-      elements.toggleConfirmPassword.textContent = "Mostrar";
-      elements.toggleConfirmPassword.setAttribute(
-        "aria-label",
-        "Mostrar confirmação de senha"
-      );
-      elements.toggleConfirmPassword.setAttribute("aria-pressed", "false");
-    }
-  }
 
   function togglePasswordVisibility(input, button, label) {
     if (!input || !button) return;
 
-    const showing = input.type === "password";
+    const show = input.type === "password";
 
-    input.type = showing ? "text" : "password";
-    button.textContent = showing ? "Ocultar" : "Mostrar";
-    button.setAttribute("aria-pressed", String(showing));
+    input.type = show ? "text" : "password";
+    button.textContent = show ? "Ocultar" : "Mostrar";
+
+    button.setAttribute("aria-pressed", String(show));
     button.setAttribute(
       "aria-label",
-      `${showing ? "Ocultar" : "Mostrar"} ${label}`
+      `${show ? "Ocultar" : "Mostrar"} ${label}`
     );
 
+    button.title = show ? "Ocultar senha" : "Mostrar senha";
     input.focus();
   }
+
+  function resetPasswordVisibility() {
+    [
+      [elements.password, elements.togglePassword, "senha"],
+      [
+        elements.confirmPassword,
+        elements.toggleConfirmPassword,
+        "confirmação de senha",
+      ],
+    ].forEach(([input, button, label]) => {
+      if (input) input.type = "password";
+
+      if (button) {
+        button.textContent = "Mostrar";
+        button.setAttribute("aria-pressed", "false");
+        button.setAttribute("aria-label", `Mostrar ${label}`);
+        button.title = "Mostrar senha";
+      }
+    });
+  }
+
+  /* ========================================
+     VALIDAÇÃO DE SENHA
+  ======================================== */
 
   function validatePassword(password) {
     if (password.length < 8) {
@@ -287,41 +210,60 @@
     return "";
   }
 
+  /* ========================================
+     CONFIRMAR SENHA
+  ======================================== */
+
   function updatePasswordConfirmation() {
     const password = elements.password;
     const confirmation = elements.confirmPassword;
     const message = elements.confirmPasswordMessage;
 
-    if (!password || !confirmation || !message || !registering) {
+    if (!confirmation || !registering) {
       if (confirmation) {
         confirmation.removeAttribute("aria-invalid");
-        confirmation.classList.remove("field-error", "field-success");
+        confirmation.classList.remove(
+          "field-error",
+          "field-success"
+        );
       }
 
       setMessage(message, "");
       return true;
     }
 
-    const value = confirmation.value;
+    confirmation.classList.remove(
+      "field-error",
+      "field-success"
+    );
 
-    confirmation.classList.remove("field-error", "field-success");
-
-    if (!value) {
+    if (!confirmation.value) {
       confirmation.removeAttribute("aria-invalid");
       setMessage(message, "");
       return false;
     }
 
-    if (value !== password.value) {
+    if (confirmation.value !== (password?.value || "")) {
       confirmation.setAttribute("aria-invalid", "true");
       confirmation.classList.add("field-error");
-      setMessage(message, "As senhas não coincidem.", "error");
+
+      setMessage(
+        message,
+        "As senhas não coincidem.",
+        "error"
+      );
+
       return false;
     }
 
     confirmation.setAttribute("aria-invalid", "false");
     confirmation.classList.add("field-success");
-    setMessage(message, "As senhas coincidem.", "success");
+
+    setMessage(
+      message,
+      "As senhas coincidem!",
+      "success"
+    );
 
     return true;
   }
@@ -344,8 +286,12 @@
 
     if (passwordError) return passwordError;
 
+    if (!elements.confirmPassword) {
+      return "O campo de confirmação de senha não foi encontrado no HTML.";
+    }
+
     if (!confirmation) {
-      return "Confirme sua senha.";
+      return "Digite novamente sua senha para confirmar.";
     }
 
     if (password !== confirmation) {
@@ -355,6 +301,102 @@
 
     return "";
   }
+
+  /* ========================================
+     ALTERNAR LOGIN E CADASTRO
+  ======================================== */
+
+  function setAuthMode(isRegistering) {
+    registering = Boolean(isRegistering);
+
+    if (elements.usernameGroup) {
+      elements.usernameGroup.hidden = !registering;
+    } else if (elements.username) {
+      elements.username.hidden = !registering;
+    }
+
+    if (elements.username) {
+      elements.username.required = registering;
+    }
+
+    if (elements.identifierLabel) {
+      elements.identifierLabel.textContent = registering
+        ? "E-mail"
+        : "E-mail ou usuário";
+    }
+
+    if (elements.identifier) {
+      elements.identifier.type = registering ? "email" : "text";
+      elements.identifier.placeholder = registering
+        ? "seu@email.com"
+        : "Digite seu e-mail ou usuário";
+
+      elements.identifier.autocomplete = registering
+        ? "email"
+        : "username";
+    }
+
+    if (elements.password) {
+      elements.password.autocomplete = registering
+        ? "new-password"
+        : "current-password";
+    }
+
+    if (elements.passwordHint) {
+      elements.passwordHint.hidden = !registering;
+    }
+
+    if (elements.confirmPasswordGroup) {
+      elements.confirmPasswordGroup.hidden = !registering;
+    }
+
+    if (elements.confirmPassword) {
+      elements.confirmPassword.required = registering;
+      elements.confirmPassword.autocomplete = "new-password";
+    }
+
+    if (elements.authSubmit) {
+      elements.authSubmit.textContent = registering
+        ? "Criar conta"
+        : "Entrar";
+    }
+
+    $all("[data-auth-mode-title]").forEach((element) => {
+      element.textContent = registering
+        ? "Criar sua conta"
+        : "Bem-vindo de volta";
+    });
+
+    $all("[data-auth-mode-description]").forEach((element) => {
+      element.textContent = registering
+        ? "Preencha os dados para começar a conversar."
+        : "Entre na sua conta para continuar.";
+    });
+
+    $all("[data-auth-mode-toggle]").forEach((button) => {
+      button.textContent = registering
+        ? "Já tenho uma conta"
+        : "Criar uma conta";
+    });
+
+    if (elements.password) elements.password.value = "";
+    if (elements.confirmPassword) {
+      elements.confirmPassword.value = "";
+    }
+
+    resetPasswordVisibility();
+    setMessage(elements.authMessage, "");
+    setMessage(elements.confirmPasswordMessage, "");
+    updatePasswordConfirmation();
+  }
+
+  function toggleAuthMode() {
+    setAuthMode(!registering);
+  }
+
+  /* ========================================
+     ENVIAR LOGIN OU CADASTRO
+  ======================================== */
 
   async function handleAuthSubmit(event) {
     event.preventDefault();
@@ -367,7 +409,11 @@
     const password = elements.password?.value || "";
 
     if (!identifier || !password) {
-      setMessage(elements.authMessage, "Preencha todos os campos obrigatórios.", "error");
+      setMessage(
+        elements.authMessage,
+        "Preencha todos os campos obrigatórios.",
+        "error"
+      );
       return;
     }
 
@@ -375,7 +421,11 @@
       const validationError = validateRegistration();
 
       if (validationError) {
-        setMessage(elements.authMessage, validationError, "error");
+        setMessage(
+          elements.authMessage,
+          validationError,
+          "error"
+        );
         return;
       }
     }
@@ -413,12 +463,11 @@
 
       const user = result.user || result;
 
-      if (!user || !user.username) {
+      if (user?.username) {
+        enterApp(user);
+      } else {
         await checkSession();
-        return;
       }
-
-      enterApp(user);
     } catch (error) {
       setMessage(
         elements.authMessage,
@@ -451,29 +500,10 @@
         currentUser = null;
         showView("auth");
       }
-    } catch (error) {
+    } catch {
       currentUser = null;
       showView("auth");
     }
-  }
-
-  function enterApp(user) {
-    currentUser = user;
-    currentChannel = "geral";
-    joinedChannel = null;
-
-    showView("app");
-
-    setText(elements.currentUsername, user.username);
-
-    renderChannels();
-    clearMessages();
-
-    if (socket) {
-      socket.connect();
-    }
-
-    joinChannel(currentChannel);
   }
 
   async function logout() {
@@ -502,6 +532,22 @@
     }
   }
 
+  function enterApp(user) {
+    currentUser = user;
+    currentChannel = "geral";
+    joinedChannel = null;
+
+    showView("app");
+    setText(elements.currentUsername, user.username);
+
+    renderChannels();
+    clearMessages();
+
+    if (socket) socket.connect();
+
+    joinChannel(currentChannel);
+  }
+
   /* ========================================
      CANAIS
   ======================================== */
@@ -516,7 +562,10 @@
         channels = result.channels;
       }
     } catch (error) {
-      console.warn("Usando a lista padrão de canais:", error.message);
+      console.warn(
+        "Usando a lista padrão de canais:",
+        error.message
+      );
     }
 
     renderChannels();
@@ -529,7 +578,6 @@
 
     channels.forEach((channel) => {
       const button = document.createElement("button");
-
       button.type = "button";
       button.className = "channel-button";
       button.dataset.channel = channel;
@@ -565,14 +613,16 @@
     joinedChannel = null;
 
     setText(elements.currentChannel, `#${channel}`);
-
+    setText($("#channelName"), channel);
     renderChannels();
     clearMessages();
 
-    if (socket && socket.connected) {
+    if (socket?.connected) {
       socket.emit("join channel", channel);
     } else if (!socket) {
-      addSystemMessage("A conexão com o servidor de chat não está disponível.");
+      addSystemMessage(
+        "A conexão com o servidor de chat não está disponível."
+      );
     }
   }
 
@@ -586,40 +636,40 @@
     }
   }
 
-  function addSystemMessage(text) {
+  function addSystemMessage(value) {
     if (!elements.messages) return;
 
     const item = document.createElement("div");
     item.className = "message system";
-    item.textContent = text;
+    item.textContent = value;
 
     elements.messages.appendChild(item);
     scrollMessagesToBottom();
   }
 
   function scrollMessagesToBottom() {
-    if (!elements.messages) return;
-
-    elements.messages.scrollTop = elements.messages.scrollHeight;
+    if (elements.messages) {
+      elements.messages.scrollTop = elements.messages.scrollHeight;
+    }
   }
 
   function renderMessage(message) {
     if (!elements.messages || !message) return;
 
-    const rowChannel = message.channel || joinedChannel || currentChannel;
-
+    const rowChannel = message.channel || currentChannel;
     if (rowChannel !== currentChannel) return;
 
     const wrapper = document.createElement("article");
     wrapper.className = "message";
 
-    if (currentUser && message.username === currentUser.username) {
+    if (currentUser?.username === message.username) {
       wrapper.classList.add("own");
     }
 
     const avatar = document.createElement("div");
     avatar.className = "message-avatar";
-    avatar.textContent = escapeText(message.username).charAt(0).toUpperCase() || "?";
+    avatar.textContent =
+      String(message.username || "?").charAt(0).toUpperCase();
     avatar.setAttribute("aria-hidden", "true");
 
     const content = document.createElement("div");
@@ -630,29 +680,32 @@
 
     const username = document.createElement("span");
     username.className = "message-username";
-    username.textContent = escapeText(message.username || "Usuário");
+    username.textContent = message.username || "Usuário";
 
     const time = document.createElement("time");
     time.className = "message-time";
     time.textContent = formatTime(message.created_at);
 
     if (message.created_at) {
-      time.dateTime = new Date(message.created_at).toISOString();
+      const date = new Date(message.created_at);
+      if (!Number.isNaN(date.getTime())) {
+        time.dateTime = date.toISOString();
+      }
     }
 
     const text = document.createElement("p");
     text.className = "message-text";
-    text.textContent = escapeText(message.message);
+    text.textContent = String(message.message ?? "");
 
     meta.append(username, time);
     content.append(meta, text);
     wrapper.append(avatar, content);
-
     elements.messages.appendChild(wrapper);
+
     scrollMessagesToBottom();
   }
 
-  async function handleSendMessage(event) {
+  function handleSendMessage(event) {
     event.preventDefault();
 
     if (!currentUser || !socket || !socket.connected) {
@@ -663,7 +716,6 @@
     if (sendingMessage) return;
 
     const message = elements.messageInput?.value.trim() || "";
-
     if (!message) return;
 
     sendingMessage = true;
@@ -674,18 +726,16 @@
 
     socket.emit(
       "send message",
-      {
-        channel: currentChannel,
-        message,
-      },
+      { channel: currentChannel, message },
       (response) => {
         sendingMessage = false;
+        clearTimeout(sendTimeout);
 
         if (elements.sendButton) {
           elements.sendButton.disabled = false;
         }
 
-        if (response && response.error) {
+        if (response?.error) {
           addSystemMessage(response.error);
           return;
         }
@@ -697,8 +747,7 @@
       }
     );
 
-    // Evita deixar o botão travado caso o servidor não envie callback.
-    window.setTimeout(() => {
+    sendTimeout = window.setTimeout(() => {
       sendingMessage = false;
 
       if (elements.sendButton) {
@@ -735,9 +784,10 @@
     });
 
     socket.on("channel joined", (channel) => {
-      joinedChannel = typeof channel === "string"
-        ? channel
-        : channel?.channel || currentChannel;
+      joinedChannel =
+        typeof channel === "string"
+          ? channel
+          : channel?.channel || currentChannel;
 
       if (joinedChannel === currentChannel) {
         setText(elements.currentChannel, `#${currentChannel}`);
@@ -749,10 +799,7 @@
       if (!Array.isArray(history)) return;
 
       clearMessages();
-
-      history.forEach((message) => {
-        renderMessage(message);
-      });
+      history.forEach(renderMessage);
     });
 
     socket.on("chat message", (message) => {
@@ -767,14 +814,16 @@
   }
 
   function updateConnectionStatus(connected) {
-    const status = $("#connectionStatus") || $(".connection-status");
+    const status =
+      $("#connectionStatus") || $(".connection-status");
 
     if (!status) return;
 
     status.classList.toggle("offline", !connected);
     status.classList.toggle("disconnected", !connected);
-
-    status.textContent = connected ? "Conectado" : "Desconectado";
+    status.textContent = connected
+      ? "Conectado"
+      : "Desconectado";
   }
 
   /* ========================================
@@ -816,14 +865,18 @@
         const light = themeToggle.checked;
 
         document.body.classList.toggle("light-theme", light);
-        localStorage.setItem("nexo-theme", light ? "light" : "dark");
+        localStorage.setItem(
+          "nexo-theme",
+          light ? "light" : "dark"
+        );
       });
     }
 
     const soundToggle = $("#soundToggle");
 
     if (soundToggle) {
-      soundToggle.checked = localStorage.getItem("nexo-sound") !== "off";
+      soundToggle.checked =
+        localStorage.getItem("nexo-sound") !== "off";
 
       soundToggle.addEventListener("change", () => {
         localStorage.setItem(
@@ -835,19 +888,19 @@
   }
 
   /* ========================================
-     EVENTOS DA INTERFACE
+     EVENTOS
   ======================================== */
 
   function setupEvents() {
-    if (elements.authForm) {
-      elements.authForm.addEventListener("submit", handleAuthSubmit);
-    }
+    elements.authForm?.addEventListener(
+      "submit",
+      handleAuthSubmit
+    );
 
     $all("[data-auth-mode-toggle]").forEach((button) => {
       button.addEventListener("click", toggleAuthMode);
     });
 
-    // Compatibilidade com botões de alternância usados em versões anteriores.
     [
       "#switchAuthMode",
       "#toggleAuthMode",
@@ -861,69 +914,54 @@
       }
     });
 
-    if (elements.togglePassword) {
-      elements.togglePassword.addEventListener("click", () => {
-        togglePasswordVisibility(
-          elements.password,
-          elements.togglePassword,
-          "senha"
-        );
-      });
-    }
-
-    if (elements.toggleConfirmPassword) {
-      elements.toggleConfirmPassword.addEventListener("click", () => {
-        togglePasswordVisibility(
-          elements.confirmPassword,
-          elements.toggleConfirmPassword,
-          "confirmação de senha"
-        );
-      });
-    }
-
-    if (elements.password) {
-      elements.password.addEventListener("input", updatePasswordConfirmation);
-    }
-
-    if (elements.confirmPassword) {
-      elements.confirmPassword.addEventListener(
-        "input",
-        updatePasswordConfirmation
+    elements.togglePassword?.addEventListener("click", () => {
+      togglePasswordVisibility(
+        elements.password,
+        elements.togglePassword,
+        "senha"
       );
-    }
+    });
 
-    if (elements.logoutButton) {
-      elements.logoutButton.addEventListener("click", logout);
-    }
+    elements.toggleConfirmPassword?.addEventListener("click", () => {
+      togglePasswordVisibility(
+        elements.confirmPassword,
+        elements.toggleConfirmPassword,
+        "confirmação de senha"
+      );
+    });
 
-    if (elements.settingsButton) {
-      elements.settingsButton.addEventListener("click", toggleSettings);
-    }
+    elements.password?.addEventListener(
+      "input",
+      updatePasswordConfirmation
+    );
 
-    if (elements.messageForm) {
-      elements.messageForm.addEventListener("submit", handleSendMessage);
-    }
+    elements.confirmPassword?.addEventListener(
+      "input",
+      updatePasswordConfirmation
+    );
 
-    if (elements.messageInput) {
-      elements.messageInput.addEventListener("keydown", (event) => {
-        if (event.key === "Enter" && !event.shiftKey) {
-          event.preventDefault();
+    elements.logoutButton?.addEventListener("click", logout);
+    elements.settingsButton?.addEventListener("click", toggleSettings);
 
-          if (elements.messageForm?.requestSubmit) {
-            elements.messageForm.requestSubmit();
-          }
-        }
-      });
-    }
+    elements.messageForm?.addEventListener(
+      "submit",
+      handleSendMessage
+    );
 
-    const closeSettings = $("#closeSettings");
+    elements.messageInput?.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" && !event.shiftKey) {
+        event.preventDefault();
+        elements.messageForm?.requestSubmit();
+      }
+    });
 
-    if (closeSettings) {
-      closeSettings.addEventListener("click", () => {
-        settingsOpen = true;
-        toggleSettings();
-      });
-    }
+    $("#closeSettings")?.addEventListener("click", () => {
+      if (settingsOpen) toggleSettings();
+    });
+
+    $("#closeRightPanel")?.addEventListener("click", () => {
+      if (settingsOpen) toggleSettings();
+    });
   }
 
   /* ========================================
@@ -940,5 +978,9 @@
     await checkSession();
   }
 
-  document.addEventListener("DOMContentLoaded", init);
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", init);
+  } else {
+    init();
+  }
 })();
