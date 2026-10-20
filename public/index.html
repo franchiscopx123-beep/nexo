@@ -997,27 +997,35 @@
               body: JSON.stringify({ username, email, password })
             });
 
-            // O registro pode ou não iniciar uma sessão, conforme o servidor.
+            
+            // O registro pode ou não iniciar uma sessão automaticamente.
             try {
               const data = await api("/api/me");
 
-if (!data.authenticated || !data.user) {
-  throw new Error(
-    "Sua sessão não foi confirmada pelo servidor. " +
-    "Tente entrar novamente."
-  );
-}
-
-currentUser = data.user;
-await enterChat();
+              if (data.authenticated && data.user) {
+                currentUser = data.user;
+                await enterChat();
                 return;
               }
-            } catch {
-              // Se o cadastro não autenticar automaticamente, mostra o login.
+            } catch (error) {
+              console.error(
+                "Erro ao confirmar sessão após o cadastro:",
+                error
+              );
             }
 
             setMode("login");
             identifierInput.value = email;
+            passwordInput.value = "";
+            confirmInput.value = "";
+
+            showNotice(
+              authNotice,
+              "Conta criada! Entre com seu e-mail ou usuário e sua senha.",
+              "success"
+            );
+            return;
+
             passwordInput.value = "";
             confirmInput.value = "";
             showNotice(
