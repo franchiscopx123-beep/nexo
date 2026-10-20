@@ -1387,6 +1387,8 @@ function updateCallButtons() {
 }
 
 function resetCallInterface() {
+  stopRingtone();
+
   if (peerConnection) {
     const oldConnection = peerConnection;
     peerConnection = null;
@@ -1407,8 +1409,12 @@ function resetCallInterface() {
   remoteVideo.hidden = false;
   localVideo.hidden = false;
 
+  switchCameraBtn.hidden = true;
+  switchCameraBtn.disabled = false;
+
   callPeerId = null;
   callPeerName = "";
+  callMode = "audio";
   incomingCall = null;
   isMuted = false;
   isCaller = false;
@@ -1608,11 +1614,13 @@ async function addPendingIceCandidates() {
         new RTCIceCandidate(candidate)
       );
     } catch (error) {
-      console.warn("Não foi possível adicionar candidato ICE:", error);
+      console.warn(
+        "Não foi possível adicionar candidato ICE:",
+        error
+      );
     }
   }
 }
-
 async function startCall(mode) {
   if (!socket?.connected) {
     showNotice(chatNotice, "Conecte-se ao chat antes de iniciar uma chamada.");
@@ -1681,22 +1689,35 @@ async function startCall(mode) {
   }
 }
 
+
 async function acceptIncomingCall() {
   if (!incomingCall || !socket?.connected) {
-    showNotice(chatNotice, "A solicitação de chamada não está mais disponível.");
+    showNotice(
+      chatNotice,
+      "A solicitação de chamada não está mais disponível."
+    );
     finishCall(false);
     return;
   }
 
+  stopRingtone();
+
   try {
-    callStatus.textContent = "Solicitando acesso ao microfone e à câmera...";
+    callStatus.textContent =
+      "Solicitando acesso ao microfone e à câmera...";
 
     localStream = await getCallMedia(callMode);
+
     localVideo.srcObject = localStream;
     localVideo.hidden = callMode !== "video";
     remoteVideo.hidden = callMode !== "video";
+    switchCameraBtn.hidden = callMode !== "video";
 
     createPeerConnection();
+
+    if (!socket?.connected) {
+      throw new Error("A conexão com o servidor foi perdida.");
+    }
 
     socket.emit("call:accept", {
       targetId: callPeerId
