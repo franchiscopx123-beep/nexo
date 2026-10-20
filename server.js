@@ -33,6 +33,8 @@ const pool = new Pool({
 });
 
 const CHANNELS = ["geral", "jogos", "tecnologia", "conversa"];
+const MAX_MESSAGE_LENGTH = 2000;
+const MESSAGE_COOLDOWN_MS = 400;
 
 app.disable("x-powered-by");
 app.use(express.json({ limit: "20kb" }));
@@ -56,21 +58,22 @@ const sessionMiddleware = session({
 });
 
 app.use(sessionMiddleware);
-
 io.engine.use(sessionMiddleware);
 
 app.use(express.static(path.join(__dirname, "public")));
 
 function sameOrigin(req, res, next) {
   const origin = req.get("origin");
+
   if (!origin) return next();
 
   try {
     const originUrl = new URL(origin);
-    const requestHost = req.get("host");
 
-    if (originUrl.host !== requestHost) {
-      return res.status(403).json({ error: "Origem da requisição não permitida." });
+    if (originUrl.host !== req.get("host")) {
+      return res.status(403).json({
+        error: "Origem da requisição não permitida."
+      });
     }
   } catch {
     return res.status(403).json({ error: "Origem inválida." });
@@ -81,8 +84,11 @@ function sameOrigin(req, res, next) {
 
 function requireAuth(req, res, next) {
   if (!req.session.user) {
-    return res.status(401).json({ error: "Você precisa entrar na sua conta." });
+    return res.status(401).json({
+      error: "Você precisa entrar na sua conta."
+    });
   }
+
   next();
 }
 
@@ -106,9 +112,48 @@ function publicUser(user) {
 
 function saveSession(req) {
   return new Promise((resolve, reject) => {
-    req.session.save((error) => error ? reject(error) : resolve());
+    req.session.save(error => error ? reject(error) : resolve());
   });
 }
+
+function validChannel(channel) {
+  return typeof channel === "string" && CHANNELS.includes(channel);
+}
+
+function validMessage(message) {
+  return typeof message === "string"
+    && message.trim().length > 0
+    && message.trim().length <= MAX_MESSAGE_LENGTH;
+}
+
+function asyncReply(callback, data) {
+  if (typeof callback === "function") callback(data);
+}
+
+function emitError(socket, message) {
+  socket.emit("error message", { error: message });
+}
+
+async function getChannelMessages(channel) {
+  const result = await pool.query(
+    `SELECT id, user_id, username, message, channel, created_at, updated_at
+     FROM (
+       SELECT id, user_id, username, message, channel, created_at, updated_at
+       FROM messages
+       WHERE channel = $1
+       ORDER BY created_at DESC, id DESC
+       LIMIT 100
+     ) recent
+     ORDER BY created_at ASC, id ASC`,
+    [channel]
+  );
+
+  return result.rows;
+}
+
+// -----------------------------------------------------------------------------
+// API HTTP
+// -----------------------------------------------------------------------------
 
 app.get("/api/status", (req, res) => {
   res.json({ ok: true, name: "NEXO" });
@@ -158,6 +203,7 @@ app.post("/api/register", sameOrigin, async (req, res) => {
 
     const user = publicUser(result.rows[0]);
     req.session.user = user;
+
     await saveSession(req);
 
     res.status(201).json({ user });
@@ -179,24 +225,31 @@ app.post("/api/login", sameOrigin, async (req, res) => {
     const password = req.body.password;
 
     if (!identifier || typeof password !== "string") {
-      return res.status(400).json({ error: "Informe usuário/e-mail e senha." });
+      return res.status(400).json({
+        error: "Informe usuário/e-mail e senha."
+      });
     }
 
     const result = await pool.query(
       `SELECT id, username, email, password_hash
        FROM users
-       WHERE LOWER(username) = LOWER($1) OR LOWER(email) = LOWER($1)
+       WHERE LOWER(username) = LOWER($1)
+          OR LOWER(email) = LOWER($1)
        LIMIT 1`,
       [identifier]
     );
 
-    const userRecord = result.rows[0];
-    if (!userRecord || !(await bcrypt.compare(password, userRecord.password_hash))) {
-      return res.status(401).json({ error: "Usuário ou senha incorretos." });
+    const record = result.rows[0];
+
+    if (!record || !(await bcrypt.compare(password, record.password_hash))) {
+      return res.status(401).json({
+        error: "Usuário ou senha incorretos."
+      });
     }
 
-    const user = publicUser(userRecord);
+    const user = publicUser(record);
     req.session.user = user;
+
     await saveSession(req);
 
     res.json({ user });
@@ -207,10 +260,12 @@ app.post("/api/login", sameOrigin, async (req, res) => {
 });
 
 app.post("/api/logout", sameOrigin, (req, res) => {
-  req.session.destroy((error) => {
+  req.session.destroy(error => {
     if (error) {
       console.error("Erro ao encerrar sessão:", error);
-      return res.status(500).json({ error: "Não foi possível sair da conta." });
+      return res.status(500).json({
+        error: "Não foi possível sair da conta."
+      });
     }
 
     res.clearCookie("connect.sid", {
@@ -225,104 +280,334 @@ app.post("/api/logout", sameOrigin, (req, res) => {
 
 app.get("/api/messages/:channel", requireAuth, async (req, res) => {
   const channel = req.params.channel;
-  if (!CHANNELS.includes(channel)) {
+
+  if (!validChannel(channel)) {
     return res.status(404).json({ error: "Canal não encontrado." });
   }
 
   try {
-    const result = await pool.query(
-      `SELECT id, username, message, channel, created_at
-       FROM messages
-       WHERE channel = $1
-       ORDER BY created_at DESC
-       LIMIT 100`,
-      [channel]
-    );
-
-    res.json(result.rows.reverse());
+    res.json(await getChannelMessages(channel));
   } catch (error) {
     console.error("Erro ao buscar mensagens:", error);
-    res.status(500).json({ error: "Não foi possível carregar as mensagens." });
+    res.status(500).json({
+      error: "Não foi possível carregar as mensagens."
+    });
   }
 });
 
+// -----------------------------------------------------------------------------
+// Socket.IO: autenticação e presença
+// -----------------------------------------------------------------------------
+
 io.use((socket, next) => {
   const user = socket.request.session?.user;
-  if (!user) return next(new Error("Faça login para conectar ao chat."));
+
+  if (!user) {
+    return next(new Error("Faça login para conectar ao chat."));
+  }
+
   socket.user = user;
   next();
 });
 
-io.on("connection", (socket) => {
-  socket.on("join channel", async (channel) => {
-    if (typeof channel !== "string" || !CHANNELS.includes(channel)) {
-      socket.emit("error message", { error: "Canal inválido." });
+const typingByChannel = new Map();
+
+function getTypingMap(channel) {
+  if (!typingByChannel.has(channel)) {
+    typingByChannel.set(channel, new Map());
+  }
+
+  return typingByChannel.get(channel);
+}
+
+function broadcastTyping(channel) {
+  const users = [...new Set([...getTypingMap(channel).values()])];
+
+  io.to(channel).emit("typing users", { channel, users });
+}
+
+function removeTyping(socket, channel) {
+  const typing = typingByChannel.get(channel);
+
+  if (!typing) return;
+
+  typing.delete(socket.id);
+
+  if (typing.size === 0) {
+    typingByChannel.delete(channel);
+  }
+
+  broadcastTyping(channel);
+}
+
+async function broadcastOnlineUsers(channel) {
+  try {
+    const clients = await io.in(channel).fetchSockets();
+    const uniqueUsers = new Map();
+
+    for (const client of clients) {
+      if (!client.user) continue;
+
+      uniqueUsers.set(String(client.user.id), {
+        id: client.user.id,
+        username: client.user.username
+      });
+    }
+
+    io.to(channel).emit("online users", {
+      channel,
+      users: [...uniqueUsers.values()]
+    });
+  } catch (error) {
+    console.error("Erro ao atualizar usuários online:", error);
+  }
+}
+
+io.on("connection", socket => {
+  socket.data.lastMessageAt = 0;
+
+  socket.on("join channel", async channel => {
+    if (!validChannel(channel)) {
+      emitError(socket, "Canal inválido.");
       return;
     }
 
-    for (const room of socket.rooms) {
-      if (CHANNELS.includes(room)) socket.leave(room);
+    const previousChannel = socket.currentChannel;
+
+    if (previousChannel && previousChannel !== channel) {
+      removeTyping(socket, previousChannel);
+      socket.leave(previousChannel);
     }
 
     socket.join(channel);
     socket.currentChannel = channel;
 
     try {
-      const result = await pool.query(
-        `SELECT id, username, message, channel, created_at
-         FROM messages
-         WHERE channel = $1
-         ORDER BY created_at DESC
-         LIMIT 100`,
-        [channel]
-      );
+      const messages = await getChannelMessages(channel);
 
       socket.emit("channel joined", { channel });
-      socket.emit("chat history", result.rows.reverse());
+      socket.emit("chat history", messages);
+
+      await broadcastOnlineUsers(channel);
+      broadcastTyping(channel);
     } catch (error) {
-      console.error("Erro ao carregar histórico:", error);
-      socket.emit("error message", { error: "Não foi possível carregar o histórico." });
+      console.error("Erro ao carregar histórico via Socket.IO:", error);
+      emitError(socket, "Não foi possível carregar o histórico.");
     }
   });
 
-  socket.on("send message", async (payload, callback) => {
-    const reply = typeof callback === "function" ? callback : () => {};
+  socket.on("typing", payload => {
+    const channel = payload?.channel;
 
+    if (
+      !validChannel(channel) ||
+      socket.currentChannel !== channel ||
+      !socket.rooms.has(channel)
+    ) {
+      return;
+    }
+
+    const typing = getTypingMap(channel);
+
+    if (payload.isTyping === true) {
+      typing.set(socket.id, socket.user.username);
+    } else {
+      typing.delete(socket.id);
+    }
+
+    if (typing.size === 0) {
+      typingByChannel.delete(channel);
+    }
+
+    broadcastTyping(channel);
+  });
+
+  // Enviar mensagens: aceita "message" e "content".
+  socket.on("send message", async (payload, callback) => {
     try {
       const channel = payload?.channel;
       const message = typeof payload?.message === "string"
         ? payload.message.trim()
-        : "";
+        : typeof payload?.content === "string"
+          ? payload.content.trim()
+          : "";
 
-      if (!CHANNELS.includes(channel)) {
-        return reply({ error: "Canal inválido." });
+      if (!validChannel(channel)) {
+        return asyncReply(callback, { error: "Canal inválido." });
       }
 
-      if (socket.currentChannel !== channel || !socket.rooms.has(channel)) {
-        return reply({ error: "Entre no canal antes de enviar mensagens." });
+      if (
+        socket.currentChannel !== channel ||
+        !socket.rooms.has(channel)
+      ) {
+        return asyncReply(callback, {
+          error: "Entre no canal antes de enviar mensagens."
+        });
       }
 
-      if (!message || message.length > 2000) {
-        return reply({ error: "A mensagem deve ter entre 1 e 2000 caracteres." });
+      if (!validMessage(message)) {
+        return asyncReply(callback, {
+          error: "A mensagem deve ter entre 1 e 2000 caracteres."
+        });
       }
 
-      const username = socket.user.username;
+      const now = Date.now();
+
+      if (now - socket.data.lastMessageAt < MESSAGE_COOLDOWN_MS) {
+        return asyncReply(callback, {
+          error: "Espere um instante antes de enviar outra mensagem."
+        });
+      }
+
+      socket.data.lastMessageAt = now;
 
       const result = await pool.query(
-        `INSERT INTO messages (username, message, channel)
-         VALUES ($1, $2, $3)
-         RETURNING id, username, message, channel, created_at`,
-        [username, message, channel]
+        `INSERT INTO messages (user_id, username, message, channel)
+         VALUES ($1, $2, $3, $4)
+         RETURNING id, user_id, username, message, channel,
+                   created_at, updated_at`,
+        [socket.user.id, socket.user.username, message, channel]
       );
 
-      io.to(channel).emit("chat message", result.rows[0]);
-      reply({ ok: true });
+      const saved = result.rows[0];
+
+      io.to(channel).emit("chat message", saved);
+      removeTyping(socket, channel);
+
+      asyncReply(callback, { ok: true, message: saved });
     } catch (error) {
       console.error("Erro ao enviar mensagem:", error);
-      reply({ error: "Não foi possível enviar a mensagem." });
+      asyncReply(callback, {
+        error: "Não foi possível enviar a mensagem."
+      });
+    }
+  });
+
+  // Editar mensagens próprias.
+  socket.on("edit message", async (payload, callback) => {
+    try {
+      const id = Number(payload?.id);
+      const channel = payload?.channel;
+      const message = typeof payload?.message === "string"
+        ? payload.message.trim()
+        : typeof payload?.content === "string"
+          ? payload.content.trim()
+          : "";
+
+      if (!Number.isSafeInteger(id) || id <= 0) {
+        return asyncReply(callback, {
+          error: "Identificador de mensagem inválido."
+        });
+      }
+
+      if (
+        !validChannel(channel) ||
+        socket.currentChannel !== channel ||
+        !socket.rooms.has(channel)
+      ) {
+        return asyncReply(callback, {
+          error: "Canal inválido ou não selecionado."
+        });
+      }
+
+      if (!validMessage(message)) {
+        return asyncReply(callback, {
+          error: "A mensagem deve ter entre 1 e 2000 caracteres."
+        });
+      }
+
+      const result = await pool.query(
+        `UPDATE messages
+         SET message = $1, updated_at = NOW()
+         WHERE id = $2 AND user_id = $3 AND channel = $4
+         RETURNING id, user_id, username, message, channel,
+                   created_at, updated_at`,
+        [message, id, socket.user.id, channel]
+      );
+
+      if (!result.rowCount) {
+        return asyncReply(callback, {
+          error: "Mensagem não encontrada ou você não pode editá-la."
+        });
+      }
+
+      const updated = result.rows[0];
+
+      io.to(channel).emit("message updated", updated);
+      asyncReply(callback, { ok: true, message: updated });
+    } catch (error) {
+      console.error("Erro ao editar mensagem:", error);
+      asyncReply(callback, { error: "Não foi possível editar a mensagem." });
+    }
+  });
+
+  // Excluir mensagens próprias.
+  socket.on("delete message", async (payload, callback) => {
+    try {
+      const id = Number(payload?.id);
+      const channel = payload?.channel;
+
+      if (!Number.isSafeInteger(id) || id <= 0) {
+        return asyncReply(callback, {
+          error: "Identificador de mensagem inválido."
+        });
+      }
+
+      if (
+        !validChannel(channel) ||
+        socket.currentChannel !== channel ||
+        !socket.rooms.has(channel)
+      ) {
+        return asyncReply(callback, {
+          error: "Canal inválido ou não selecionado."
+        });
+      }
+
+      const result = await pool.query(
+        `DELETE FROM messages
+         WHERE id = $1 AND user_id = $2 AND channel = $3
+         RETURNING id, channel`,
+        [id, socket.user.id, channel]
+      );
+
+      if (!result.rowCount) {
+        return asyncReply(callback, {
+          error: "Mensagem não encontrada ou você não pode excluí-la."
+        });
+      }
+
+      const deleted = result.rows[0];
+
+      io.to(channel).emit("message deleted", {
+        id: deleted.id,
+        channel: deleted.channel
+      });
+
+      asyncReply(callback, { ok: true, id: deleted.id });
+    } catch (error) {
+      console.error("Erro ao excluir mensagem:", error);
+      asyncReply(callback, { error: "Não foi possível excluir a mensagem." });
+    }
+  });
+
+  socket.on("disconnecting", () => {
+    for (const room of socket.rooms) {
+      if (CHANNELS.includes(room)) {
+        removeTyping(socket, room);
+      }
+    }
+  });
+
+  socket.on("disconnect", async () => {
+    for (const channel of CHANNELS) {
+      await broadcastOnlineUsers(channel);
     }
   });
 });
+
+// -----------------------------------------------------------------------------
+// Inicialização do PostgreSQL e servidor
+// -----------------------------------------------------------------------------
 
 async function start() {
   await pool.query(`
@@ -345,12 +630,24 @@ async function start() {
     )
   `);
 
+  // Migrações seguras para instalações existentes.
+  await pool.query(`
+    ALTER TABLE messages
+    ADD COLUMN IF NOT EXISTS user_id INTEGER
+    REFERENCES users(id) ON DELETE SET NULL
+  `);
+
+  await pool.query(`
+    ALTER TABLE messages
+    ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ
+  `);
+
   server.listen(PORT, "0.0.0.0", () => {
     console.log(`NEXO está rodando na porta ${PORT}`);
   });
 }
 
-start().catch((error) => {
+start().catch(error => {
   console.error("Não foi possível iniciar o NEXO:", error);
   process.exit(1);
 });
