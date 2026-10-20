@@ -4,7 +4,7 @@ require("dotenv").config();
 const express = require("express");
 const http = require("http");
 const path = require("path");
-const bcrypt = require("bcryptjs");
+const bcrypt = require("bcrypt");
 const session = require("express-session");
 const PgSession = require("connect-pg-simple")(session);
 const { Pool } = require("pg");
