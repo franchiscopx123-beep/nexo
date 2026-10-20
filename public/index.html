@@ -1000,9 +1000,16 @@
             // O registro pode ou não iniciar uma sessão, conforme o servidor.
             try {
               const data = await api("/api/me");
-              if (data.user) {
-                currentUser = data.user;
-                await enterChat();
+
+if (!data.authenticated || !data.user) {
+  throw new Error(
+    "Sua sessão não foi confirmada pelo servidor. " +
+    "Tente entrar novamente."
+  );
+}
+
+currentUser = data.user;
+await enterChat();
                 return;
               }
             } catch {
