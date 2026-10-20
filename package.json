@@ -1,22 +1,23 @@
 
 {
   "name": "nexo",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "private": true,
-  "description": "Plataforma de comunicacao NEXO",
+  "description": "NEXO - plataforma de comunidade e chat em tempo real",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "check": "node --check server.js && node --check public/app.js"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=22 <25"
   },
   "dependencies": {
-    "bcrypt": "^5.1.1",
+    "bcrypt": "^6.0.0",
     "connect-pg-simple": "^10.0.0",
-    "express": "^4.21.2",
-    "express-session": "^1.18.1",
-    "pg": "^8.13.1",
+    "express": "^5.1.0",
+    "express-session": "^1.18.2",
+    "pg": "^8.16.3",
     "socket.io": "^4.8.1"
   }
 }
