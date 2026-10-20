@@ -13,6 +13,10 @@ const { Pool } = require("pg");
 const { Server } = require("socket.io");
 
 const app = express();
+
+// Necessário para reconhecer HTTPS atrás do proxy do Render.
+app.set("trust proxy", 1);
+
 const server = http.createServer(app);
 const io = new Server(server);
 
