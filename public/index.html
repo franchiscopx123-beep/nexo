@@ -596,6 +596,7 @@
 </style>
 </head>
 <body>
+  <audio id="remoteAudio" autoplay></audio>
   <section class="auth-screen" id="authScreen">
     <div class="auth-layout">
       <div class="intro">
@@ -775,6 +776,9 @@
     let peerConnection = null;
     let incomingCall = null;
     let isMuted = false;
+    let currentCameraFacing = "user";
+    
+    const remoteAudio = $("#remoteAudio");
 
     function showNotice(element, message, type = "error") {
       element.textContent = message || "";
@@ -1239,6 +1243,11 @@
       } catch (error) {
         console.warn("Erro ao encerrar sessão no servidor:", error);
       } finally {
+        if (callPeerId !== null) {
+  finishCall(true);
+} else {
+  resetCallInterface();
+}
         if (socket) {
           socket.disconnect();
           socket = null;
@@ -1275,53 +1284,54 @@ const muteCallBtn = $("#muteCallBtn");
 const endCallBtn = $("#endCallBtn");
     
 let ringtoneTimer = null;
-let ringtoneAudioContext = null;
-let currentCameraFacing = "user";
+let ringtoneTimeout = null;
 let ringtoneType = "incoming";
+let ringtoneAudioContext = null;
 
 function prepareCallAudio() {
+  const AudioContextClass =
+    window.AudioContext || window.webkitAudioContext;
+
+  if (!AudioContextClass) return;
+
   if (!ringtoneAudioContext) {
-    const AudioContextClass =
-      window.AudioContext || window.webkitAudioContext;
-
-    if (!AudioContextClass) return;
-
     ringtoneAudioContext = new AudioContextClass();
   }
 
   if (ringtoneAudioContext.state === "suspended") {
-    ringtoneAudioContext.resume().catch(() => {});
+    ringtoneAudioContext.resume().catch(console.warn);
   }
 }
 
-document.addEventListener("pointerdown", prepareCallAudio, {
-  once: true
-});
 
-function playCallTone(frequency, duration = 350) {
-  if (!ringtoneAudioContext ||
-      ringtoneAudioContext.state !== "running") {
+function playCallTone(frequency, duration) {
+  if (
+    !ringtoneAudioContext ||
+    ringtoneAudioContext.state !== "running"
+  ) {
     return;
   }
 
-  const ctx = ringtoneAudioContext;
-  const oscillator = ctx.createOscillator();
-  const gain = ctx.createGain();
-  const now = ctx.currentTime;
+  const oscillator = ringtoneAudioContext.createOscillator();
+  const gain = ringtoneAudioContext.createGain();
+  const now = ringtoneAudioContext.currentTime;
 
-  oscillator.type = "sine";
   oscillator.frequency.value = frequency;
+  oscillator.type = "sine";
 
-  gain.gain.setValueAtTime(0.001, now);
-  gain.gain.linearRampToValueAtTime(0.12, now + 0.025);
-  gain.gain.setValueAtTime(0.12, now + duration / 1000 - 0.05);
-  gain.gain.linearRampToValueAtTime(
-    0.001,
+  gain.gain.setValueAtTime(0.0001, now);
+  gain.gain.exponentialRampToValueAtTime(0.12, now + 0.03);
+  gain.gain.setValueAtTime(
+    0.12,
+    now + Math.max(0.04, duration / 1000 - 0.05)
+  );
+  gain.gain.exponentialRampToValueAtTime(
+    0.0001,
     now + duration / 1000
   );
 
   oscillator.connect(gain);
-  gain.connect(ctx.destination);
+  gain.connect(ringtoneAudioContext.destination);
 
   oscillator.start(now);
   oscillator.stop(now + duration / 1000);
@@ -1332,6 +1342,11 @@ function stopRingtone() {
     clearInterval(ringtoneTimer);
     ringtoneTimer = null;
   }
+
+  if (ringtoneTimeout !== null) {
+    clearTimeout(ringtoneTimeout);
+    ringtoneTimeout = null;
+  }
 }
 
 function startRingtone(type = "incoming") {
@@ -1340,25 +1355,32 @@ function startRingtone(type = "incoming") {
 
   ringtoneType = type;
 
-  const ring = () => {
-    if (!ringtoneAudioContext ||
-        ringtoneAudioContext.state !== "running") {
+  function ring() {
+    if (
+      !ringtoneAudioContext ||
+      ringtoneAudioContext.state !== "running"
+    ) {
       return;
     }
 
     if (ringtoneType === "outgoing") {
       playCallTone(440, 650);
-    } else {
-      playCallTone(660, 220);
-
-      setTimeout(() => {
-        if (ringtoneTimer !== null &&
-            ringtoneType === "incoming") {
-          playCallTone(880, 220);
-        }
-      }, 280);
+      return;
     }
-  };
+
+    playCallTone(660, 220);
+
+    ringtoneTimeout = setTimeout(() => {
+      ringtoneTimeout = null;
+
+      if (
+        ringtoneTimer !== null &&
+        ringtoneType === "incoming"
+      ) {
+        playCallTone(880, 220);
+      }
+    }, 280);
+  }
 
   ring();
   ringtoneTimer = setInterval(ring, 1500);
@@ -1405,7 +1427,8 @@ function resetCallInterface() {
 
   remoteVideo.srcObject = null;
   localVideo.srcObject = null;
-
+  remoteAudio.srcObject = null;
+  
   remoteVideo.hidden = false;
   localVideo.hidden = false;
 
@@ -1442,19 +1465,28 @@ async function getCallMedia(mode) {
       : false
   });
 }
+
 async function switchCamera() {
   if (!localStream || !peerConnection || callMode !== "video") {
     return;
   }
 
   switchCameraBtn.disabled = true;
+
   let newStream = null;
+  let currentTrack = null;
+  let cameraChanged = false;
 
   try {
-    const currentTrack = localStream.getVideoTracks()[0];
-    const currentSettings = currentTrack?.getSettings();
+    currentTrack = localStream.getVideoTracks()[0];
+
+    if (!currentTrack) {
+      throw new Error("Nenhuma câmera está ativa.");
+    }
+
+    const currentSettings = currentTrack.getSettings();
     const currentFacing =
-      currentSettings?.facingMode || currentCameraFacing;
+      currentSettings.facingMode || currentCameraFacing;
 
     const nextFacing =
       currentFacing === "environment" ? "user" : "environment";
@@ -1462,20 +1494,22 @@ async function switchCamera() {
     try {
       newStream = await navigator.mediaDevices.getUserMedia({
         video: {
-          facingMode: { exact: nextFacing },
+          facingMode: { ideal: nextFacing },
           width: { ideal: 1280 },
           height: { ideal: 720 }
         },
         audio: false
       });
     } catch {
-      const devices = await navigator.mediaDevices.enumerateDevices();
+      const devices =
+        await navigator.mediaDevices.enumerateDevices();
+
       const cameras = devices.filter(
         device => device.kind === "videoinput"
       );
 
       const otherCamera = cameras.find(
-        camera => camera.deviceId !== currentSettings?.deviceId
+        camera => camera.deviceId !== currentSettings.deviceId
       );
 
       if (!otherCamera) {
@@ -1483,12 +1517,15 @@ async function switchCamera() {
       }
 
       newStream = await navigator.mediaDevices.getUserMedia({
-        video: { deviceId: { exact: otherCamera.deviceId } },
+        video: {
+          deviceId: { exact: otherCamera.deviceId }
+        },
         audio: false
       });
     }
 
     const newTrack = newStream.getVideoTracks()[0];
+
     const sender = peerConnection
       .getSenders()
       .find(item => item.track?.kind === "video");
@@ -1499,36 +1536,37 @@ async function switchCamera() {
 
     await sender.replaceTrack(newTrack);
 
-    if (currentTrack) {
-      localStream.removeTrack(currentTrack);
-      currentTrack.stop();
-    }
-
+    localStream.removeTrack(currentTrack);
     localStream.addTrack(newTrack);
+
     localVideo.srcObject = localStream;
+    await localVideo.play().catch(() => {});
 
     currentCameraFacing =
       newTrack.getSettings().facingMode || nextFacing;
 
+    currentTrack.stop();
+    cameraChanged = true;
+
     callStatus.textContent = "Câmera alterada.";
+
   } catch (error) {
     console.error("Erro ao trocar a câmera:", error);
+
     showNotice(
       chatNotice,
       error.message || "Não foi possível trocar a câmera."
     );
+
   } finally {
-    if (newStream) {
-      newStream.getTracks().forEach(track => {
-        if (!localStream?.getTracks().includes(track)) {
-          track.stop();
-        }
-      });
+    if (newStream && !cameraChanged) {
+      newStream.getTracks().forEach(track => track.stop());
     }
 
     switchCameraBtn.disabled = false;
   }
 }
+
 function createPeerConnection() {
   if (!localStream) {
     throw new Error("O microfone ou a câmera ainda não foram inicializados.");
@@ -1556,32 +1594,34 @@ function createPeerConnection() {
     });
   };
 
-  pc.ontrack = async (event) => {
-    if (peerConnection !== pc) return;
+ pc.ontrack = async (event) => {
+  if (peerConnection !== pc) return;
 
-    if (event.streams && event.streams[0]) {
-      remoteVideo.srcObject = event.streams[0];
-    } else {
-      let stream = remoteVideo.srcObject;
+  let stream = event.streams?.[0];
 
-      if (!(stream instanceof MediaStream)) {
-        stream = new MediaStream();
-        remoteVideo.srcObject = stream;
-      }
+  if (!stream) {
+    stream = new MediaStream();
+    stream.addTrack(event.track);
+  }
 
-      const exists = stream.getTracks().some(
-        (track) => track.id === event.track.id
-      );
+  if (callMode === "audio") {
+    remoteAudio.srcObject = stream;
 
-      if (!exists) stream.addTrack(event.track);
+    try {
+      await remoteAudio.play();
+    } catch (error) {
+      console.warn("Não foi possível reproduzir o áudio remoto:", error);
     }
+  } else {
+    remoteVideo.srcObject = stream;
 
     try {
       await remoteVideo.play();
     } catch (error) {
-      console.warn("A reprodução remota precisa de interação:", error);
+      console.warn("Não foi possível reproduzir o vídeo remoto:", error);
     }
-  };
+  }
+};
 
   pc.onconnectionstatechange = () => {
     if (peerConnection !== pc) return;
@@ -1908,29 +1948,31 @@ function registerCallSocketEvents() {
   socket.on("call:request", handleIncomingCallRequest);
 
   socket.on("call:accept", async (data) => {
-    if (
-      !isCaller ||
-      !peerConnection ||
-      String(data?.from?.id) !== String(callPeerId)
-    ) {
-      return;
-    }
+  if (
+    !isCaller ||
+    !peerConnection ||
+    String(data?.from?.id) !== String(callPeerId)
+  ) {
+    return;
+  }
 
-    try {
-      callStatus.textContent = "Chamada aceita. Criando conexão...";
+  stopRingtone();
 
-      const offer = await peerConnection.createOffer();
-      await peerConnection.setLocalDescription(offer);
+  try {
+    callStatus.textContent = "Chamada aceita. Criando conexão...";
 
-      socket.emit("call:offer", {
-        targetId: callPeerId,
-        offer: peerConnection.localDescription
-      });
-    } catch (error) {
-      console.error("Erro ao criar oferta WebRTC:", error);
-      finishCall(true, "Não foi possível iniciar a conexão.");
-    }
-  });
+    const offer = await peerConnection.createOffer();
+    await peerConnection.setLocalDescription(offer);
+
+    socket.emit("call:offer", {
+      targetId: callPeerId,
+      offer: peerConnection.localDescription
+    });
+  } catch (error) {
+    console.error("Erro ao criar oferta WebRTC:", error);
+    finishCall(true, "Não foi possível iniciar a conexão.");
+  }
+});
 
   socket.on("call:offer", handleIncomingOffer);
   socket.on("call:answer", handleIncomingAnswer);
