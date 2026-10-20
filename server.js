@@ -1,12 +1,14 @@
 
+"use strict";
+
 const express = require("express");
 const http = require("http");
 const path = require("path");
+const { Server } = require("socket.io");
+const { Pool } = require("pg");
 const bcrypt = require("bcrypt");
 const session = require("express-session");
 const PgSession = require("connect-pg-simple")(session);
-const { Pool } = require("pg");
-const { Server } = require("socket.io");
 
 const app = express();
 const server = http.createServer(app);
@@ -15,14 +17,6 @@ const io = new Server(server);
 const PORT = process.env.PORT || 3000;
 const DATABASE_URL = process.env.DATABASE_URL;
 const SESSION_SECRET = process.env.SESSION_SECRET;
-const isProduction = process.env.NODE_ENV === "production";
-
-const channels = [
-  { id: "geral", name: "Geral", icon: "#" },
-  { id: "jogos", name: "Jogos", icon: "#" },
-  { id: "tecnologia", name: "Tecnologia", icon: "#" },
-  { id: "conversa", name: "Conversa", icon: "#" }
-];
 
 console.log("Diagnóstico NEXO:", {
   DATABASE_URL_CONFIGURADA: Boolean(DATABASE_URL),
@@ -30,11 +24,9 @@ console.log("Diagnóstico NEXO:", {
 });
 
 if (!DATABASE_URL || !SESSION_SECRET) {
-  console.error(
-    "Configure DATABASE_URL e SESSION_SECRET " +
-    "em Environment no Render."
+  throw new Error(
+    "Configure DATABASE_URL e SESSION_SECRET nas variáveis de ambiente do Render."
   );
-  process.exit(1);
 }
 
 app.set("trust proxy", 1);
@@ -45,11 +37,12 @@ const pool = new Pool({
   connectionString: DATABASE_URL,
   ssl: /localhost|127\.0\.0\.1/.test(DATABASE_URL)
     ? false
-    : { rejectUnauthorized: false }
+    : { rejectUnauthorized: false },
+  connectionTimeoutMillis: 10000
 });
 
 pool.on("error", (err) => {
-  console.error("Erro inesperado no banco:", err.message);
+  console.error("Erro inesperado no PostgreSQL:", err.message);
 });
 
 const sessionMiddleware = session({
@@ -63,7 +56,7 @@ const sessionMiddleware = session({
   saveUninitialized: false,
   cookie: {
     httpOnly: true,
-    secure: isProduction,
+    secure: process.env.NODE_ENV === "production",
     sameSite: "lax",
     maxAge: 7 * 24 * 60 * 60 * 1000
   }
@@ -72,12 +65,33 @@ const sessionMiddleware = session({
 app.use(sessionMiddleware);
 io.engine.use(sessionMiddleware);
 
+const channels = ["geral", "jogos", "tecnologia", "conversa"];
+
+function saveSession(req) {
+  return new Promise((resolve, reject) => {
+    req.session.save((err) => {
+      if (err) return reject(err);
+      resolve();
+    });
+  });
+}
+
+function regenerateSession(req) {
+  return new Promise((resolve, reject) => {
+    req.session.regenerate((err) => {
+      if (err) return reject(err);
+      resolve();
+    });
+  });
+}
+
 function requireAuth(req, res, next) {
   if (!req.session.user) {
     return res.status(401).json({
       error: "Faça login para continuar."
     });
   }
+
   next();
 }
 
@@ -86,9 +100,11 @@ function sameOrigin(req, res, next) {
 
   if (origin) {
     try {
-      if (new URL(origin).host !== req.get("host")) {
+      const originUrl = new URL(origin);
+
+      if (originUrl.host !== req.get("host")) {
         return res.status(403).json({
-          error: "Origem não permitida."
+          error: "Origem da requisição não permitida."
         });
       }
     } catch {
@@ -101,12 +117,39 @@ function sameOrigin(req, res, next) {
   next();
 }
 
-function validChannel(channel) {
-  return channels.some((item) => item.id === channel);
+function validatePassword(password) {
+  if (password.length < 6) {
+    return "A senha deve ter pelo menos 6 caracteres.";
+  }
+
+  if (Buffer.byteLength(password, "utf8") > 72) {
+    return "A senha não pode ultrapassar 72 bytes.";
+  }
+
+  if (!/[A-Z]/.test(password)) {
+    return "Inclua pelo menos uma letra maiúscula.";
+  }
+
+  if (!/[a-z]/.test(password)) {
+    return "Inclua pelo menos uma letra minúscula.";
+  }
+
+  if (!/[0-9]/.test(password)) {
+    return "Inclua pelo menos um número.";
+  }
+
+  if (!/[^A-Za-z0-9]/.test(password)) {
+    return "Inclua pelo menos um símbolo, como @, # ou !.";
+  }
+
+  return null;
 }
 
 app.get("/api/status", (req, res) => {
-  res.json({ app: "NEXO", status: "online" });
+  res.json({
+    app: "NEXO",
+    status: "online"
+  });
 });
 
 app.get("/api/channels", (req, res) => {
@@ -122,13 +165,13 @@ app.get("/api/me", (req, res) => {
 
 app.post("/api/register", sameOrigin, async (req, res) => {
   try {
-    const username = String(req.body.username || "").trim();
-    const email = String(req.body.email || "").trim().toLowerCase();
-    const password = String(req.body.password || "");
+    const username = String(req.body?.username || "").trim();
+    const email = String(req.body?.email || "").trim().toLowerCase();
+    const password = String(req.body?.password || "");
 
     if (!/^[a-zA-Z0-9_]{3,24}$/.test(username)) {
       return res.status(400).json({
-        error: "Use um nome com 3 a 24 letras, números ou _."
+        error: "O nome deve ter 3 a 24 caracteres: letras, números ou _."
       });
     }
 
@@ -141,53 +184,39 @@ app.post("/api/register", sameOrigin, async (req, res) => {
       });
     }
 
-    if (
-      password.length < 10 ||
-      Buffer.byteLength(password, "utf8") > 72
-    ) {
+    const passwordError = validatePassword(password);
+
+    if (passwordError) {
       return res.status(400).json({
-        error: "A senha deve ter 10 ou mais caracteres e até 72 bytes."
+        error: passwordError
       });
     }
 
-    const hash = await bcrypt.hash(password, 12);
+    const passwordHash = await bcrypt.hash(password, 12);
 
     const result = await pool.query(
       `INSERT INTO users (username, email, password_hash)
        VALUES ($1, $2, $3)
        RETURNING id, username, email`,
-      [username, email, hash]
+      [username, email, passwordHash]
     );
 
-    req.session.regenerate((sessionError) => {
-      if (sessionError) {
-        console.error("Erro ao criar sessão:", sessionError.message);
-        return res.status(500).json({
-          error: "Não foi possível iniciar a sessão."
-        });
-      }
+    const user = result.rows[0];
 
-      req.session.user = result.rows[0];
+    await regenerateSession(req);
+    req.session.user = user;
+    await saveSession(req);
 
-      req.session.save((saveError) => {
-        if (saveError) {
-          console.error("Erro ao salvar sessão:", saveError.message);
-          return res.status(500).json({
-            error: "Não foi possível salvar a sessão."
-          });
-        }
-
-        res.status(201).json({ user: result.rows[0] });
-      });
-    });
+    res.status(201).json({ user });
   } catch (err) {
     if (err.code === "23505") {
       return res.status(409).json({
-        error: "Esse nome de usuário ou e-mail já existe."
+        error: "Esse nome de usuário ou e-mail já está cadastrado."
       });
     }
 
     console.error("Erro no cadastro:", err.message);
+
     res.status(500).json({
       error: "Não foi possível criar a conta."
     });
@@ -196,8 +225,14 @@ app.post("/api/register", sameOrigin, async (req, res) => {
 
 app.post("/api/login", sameOrigin, async (req, res) => {
   try {
-    const identifier = String(req.body.identifier || "").trim();
-    const password = String(req.body.password || "");
+    const identifier = String(req.body?.identifier || "").trim();
+    const password = String(req.body?.password || "");
+
+    if (!identifier || !password || password.length > 1024) {
+      return res.status(400).json({
+        error: "Informe seu e-mail/usuário e sua senha."
+      });
+    }
 
     const result = await pool.query(
       `SELECT id, username, email, password_hash
@@ -209,13 +244,14 @@ app.post("/api/login", sameOrigin, async (req, res) => {
     );
 
     const account = result.rows[0];
+
     const valid = account
       ? await bcrypt.compare(password, account.password_hash)
       : false;
 
     if (!valid) {
       return res.status(401).json({
-        error: "Usuário, e-mail ou senha incorretos."
+        error: "E-mail/usuário ou senha incorretos."
       });
     }
 
@@ -225,29 +261,14 @@ app.post("/api/login", sameOrigin, async (req, res) => {
       email: account.email
     };
 
-    req.session.regenerate((sessionError) => {
-      if (sessionError) {
-        console.error("Erro ao criar sessão:", sessionError.message);
-        return res.status(500).json({
-          error: "Não foi possível iniciar a sessão."
-        });
-      }
+    await regenerateSession(req);
+    req.session.user = user;
+    await saveSession(req);
 
-      req.session.user = user;
-
-      req.session.save((saveError) => {
-        if (saveError) {
-          console.error("Erro ao salvar sessão:", saveError.message);
-          return res.status(500).json({
-            error: "Não foi possível salvar a sessão."
-          });
-        }
-
-        res.json({ user });
-      });
-    });
+    res.json({ user });
   } catch (err) {
     console.error("Erro no login:", err.message);
+
     res.status(500).json({
       error: "Não foi possível entrar."
     });
@@ -258,13 +279,13 @@ app.post("/api/logout", sameOrigin, (req, res) => {
   req.session.destroy((err) => {
     if (err) {
       return res.status(500).json({
-        error: "Não foi possível encerrar a sessão."
+        error: "Não foi possível sair."
       });
     }
 
     res.clearCookie("connect.sid", {
       httpOnly: true,
-      secure: isProduction,
+      secure: process.env.NODE_ENV === "production",
       sameSite: "lax"
     });
 
@@ -275,8 +296,10 @@ app.post("/api/logout", sameOrigin, (req, res) => {
 app.get("/api/messages/:channel", requireAuth, async (req, res) => {
   const channel = req.params.channel;
 
-  if (!validChannel(channel)) {
-    return res.status(400).json({ error: "Canal inválido." });
+  if (!channels.includes(channel)) {
+    return res.status(400).json({
+      error: "Canal inválido."
+    });
   }
 
   try {
@@ -291,7 +314,8 @@ app.get("/api/messages/:channel", requireAuth, async (req, res) => {
 
     res.json(result.rows.reverse());
   } catch (err) {
-    console.error("Erro ao carregar mensagens:", err.message);
+    console.error("Erro ao buscar mensagens:", err.message);
+
     res.status(500).json({
       error: "Não foi possível carregar as mensagens."
     });
@@ -299,20 +323,26 @@ app.get("/api/messages/:channel", requireAuth, async (req, res) => {
 });
 
 io.use((socket, next) => {
-  if (!socket.request.session?.user) {
-    return next(new Error("Faça login para conectar ao chat."));
+  const user = socket.request.session?.user;
+
+  if (!user) {
+    return next(new Error("Faça login para usar o chat."));
   }
 
-  socket.user = socket.request.session.user;
+  socket.user = user;
   next();
 });
 
 io.on("connection", (socket) => {
   socket.on("join channel", async (channel) => {
-    if (typeof channel !== "string" || !validChannel(channel)) return;
+    if (typeof channel !== "string" || !channels.includes(channel)) {
+      return;
+    }
 
     for (const room of socket.rooms) {
-      if (validChannel(room)) socket.leave(room);
+      if (channels.includes(room)) {
+        socket.leave(room);
+      }
     }
 
     socket.join(channel);
@@ -335,7 +365,7 @@ io.on("connection", (socket) => {
     }
   });
 
-  socket.on("send message", async (data, callback) => {
+  socket.on("send message", async (data) => {
     try {
       if (!data || typeof data !== "object") return;
 
@@ -344,14 +374,21 @@ io.on("connection", (socket) => {
         ? data.message.trim()
         : "";
 
-      if (!validChannel(channel) || !socket.rooms.has(channel)) {
-        return socket.emit("chat error", "Entre em um canal válido.");
+      if (!channels.includes(channel)) {
+        return socket.emit("chat error", "Canal inválido.");
+      }
+
+      if (!socket.rooms.has(channel)) {
+        return socket.emit(
+          "chat error",
+          "Entre no canal antes de enviar."
+        );
       }
 
       if (!message || message.length > 2000) {
         return socket.emit(
           "chat error",
-          "A mensagem deve ter entre 1 e 2000 caracteres."
+          "A mensagem deve ter de 1 a 2000 caracteres."
         );
       }
 
@@ -363,15 +400,9 @@ io.on("connection", (socket) => {
       );
 
       io.to(channel).emit("chat message", result.rows[0]);
-
-      if (typeof callback === "function") callback({ ok: true });
     } catch (err) {
       console.error("Erro ao enviar mensagem:", err.message);
       socket.emit("chat error", "Não foi possível enviar a mensagem.");
-
-      if (typeof callback === "function") {
-        callback({ ok: false });
-      }
     }
   });
 });
@@ -397,8 +428,6 @@ async function start() {
     )
   `);
 
-  await pool.query("SELECT 1");
-
   server.listen(PORT, "0.0.0.0", () => {
     console.log(`NEXO online na porta ${PORT}`);
   });
@@ -411,7 +440,14 @@ start().catch((err) => {
 
 async function shutdown() {
   server.close();
-  await pool.end();
+  io.close();
+
+  try {
+    await pool.end();
+  } catch (err) {
+    console.error("Erro ao encerrar PostgreSQL:", err.message);
+  }
+
   process.exit(0);
 }
 
