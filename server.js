@@ -1,42 +1,439 @@
+
+require("dotenv").config();
+
+const express = require("express");
+const http = require("http");
+const path = require("path");
+const bcrypt = require("bcryptjs");
+const session = require("express-session");
+const PgSession = require("connect-pg-simple")(session);
+const { Pool } = require("pg");
+const { Server } = require("socket.io");
+
+const app = express();
+const server = http.createServer(app);
+const io = new Server(server);
+
+const PORT = Number(process.env.PORT) || 3000;
+const isProduction = process.env.NODE_ENV === "production";
+
+const CHANNELS = ["geral", "jogos", "tecnologia", "conversa"];
+
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl:
+    process.env.DATABASE_URL && isProduction
+      ? { rejectUnauthorized: false }
+      : undefined,
+});
+
+if (isProduction) {
+  app.set("trust proxy", 1);
+}
+
+app.disable("x-powered-by");
+app.use(express.json({ limit: "20kb" }));
+app.use(express.urlencoded({ extended: false, limit: "20kb" }));
+
+// --------------------------------------------------
+// BANCO DE DADOS
+// --------------------------------------------------
+
+async function initializeDatabase() {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS users (
+      id SERIAL PRIMARY KEY,
+      username VARCHAR(24) NOT NULL UNIQUE,
+      email VARCHAR(254) NOT NULL UNIQUE,
+      password_hash TEXT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS messages (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      username VARCHAR(24) NOT NULL,
+      message TEXT NOT NULL,
+      channel VARCHAR(32) NOT NULL DEFAULT 'geral',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ
+    )
+  `);
+
+  // Compatibilidade com tabelas messages mais antigas.
+  await pool.query(`
+    ALTER TABLE messages
+      ADD COLUMN IF NOT EXISTS user_id INTEGER
+        REFERENCES users(id) ON DELETE SET NULL
+  `);
+
+  await pool.query(`
+    ALTER TABLE messages
+      ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ
+  `);
+
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_messages_channel_created
+    ON messages(channel, created_at)
+  `);
+
+  console.log("Banco de dados inicializado.");
+}
+
+// --------------------------------------------------
+// SESSÕES
+// --------------------------------------------------
+
+const sessionMiddleware = session({
+  store: new PgSession({
+    pool,
+    tableName: "session",
+    createTableIfMissing: true,
+  }),
+  name: "connect.sid",
+  secret: process.env.SESSION_SECRET || "troque-esta-chave-no-arquivo-env",
+  resave: false,
+  saveUninitialized: false,
+  rolling: true,
+  cookie: {
+    httpOnly: true,
+    sameSite: "lax",
+    secure: isProduction,
+    maxAge: 7 * 24 * 60 * 60 * 1000,
+  },
+});
+
+app.use(sessionMiddleware);
+
+io.engine.use(sessionMiddleware);
+
+// --------------------------------------------------
+// ARQUIVOS DO SITE
+// --------------------------------------------------
+
+app.use(express.static(path.join(__dirname, "public")));
+
+app.get("/", (req, res) => {
+  res.sendFile(path.join(__dirname, "public", "index.html"));
+});
+
+// --------------------------------------------------
+// FUNÇÕES AUXILIARES
+// --------------------------------------------------
+
+function sameOrigin(req, res, next) {
+  const origin = req.get("origin");
+
+  if (!origin) {
+    return next();
+  }
+
+  try {
+    const originUrl = new URL(origin);
+    const requestHost = req.get("host");
+
+    if (originUrl.host !== requestHost) {
+      return res.status(403).json({
+        error: "Origem da requisição não permitida.",
+      });
+    }
+  } catch {
+    return res.status(403).json({
+      error: "Origem inválida.",
+    });
+  }
+
+  next();
+}
+
+function requireAuth(req, res, next) {
+  if (!req.session || !req.session.user) {
+    return res.status(401).json({
+      error: "Faça login para continuar.",
+    });
+  }
+
+  next();
+}
+
+function validChannel(channel) {
+  return typeof channel === "string" && CHANNELS.includes(channel);
+}
+
+function validPassword(password) {
+  return (
+    typeof password === "string" &&
+    password.length >= 8 &&
+    password.length <= 72
+  );
+}
+
+function validMessage(message) {
+  return (
+    typeof message === "string" &&
+    message.trim().length > 0 &&
+    message.length <= 2000
+  );
+}
+
+function publicUser(user) {
+  return {
+    id: user.id,
+    username: user.username,
+    email: user.email,
+    created_at: user.created_at,
+  };
+}
+
+function emitError(socket, message) {
+  socket.emit("chat error", { error: message });
+}
+
+function saveSession(req) {
+  return new Promise((resolve, reject) => {
+    req.session.save((error) => {
+      if (error) reject(error);
+      else resolve();
+    });
+  });
+}
+
+function normalizeUsername(value) {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function normalizeEmail(value) {
+  return typeof value === "string" ? value.trim().toLowerCase() : "";
+}
+
+async function getChannelMessages(channel) {
+  const result = await pool.query(
+    `SELECT id, user_id, username, message, channel, created_at, updated_at
+     FROM (
+       SELECT id, user_id, username, message, channel, created_at, updated_at
+       FROM messages
+       WHERE channel = $1
+       ORDER BY created_at DESC, id DESC
+       LIMIT 100
+     ) recent
+     ORDER BY created_at ASC, id ASC`,
+    [channel]
+  );
+
+  return result.rows;
+}
+
+// --------------------------------------------------
+// API
+// --------------------------------------------------
+
+app.get("/api/status", (req, res) => {
+  res.json({
+    ok: true,
+    name: "NEXO",
+    channels: CHANNELS,
+  });
+});
+
+app.get("/api/channels", (req, res) => {
+  res.json(CHANNELS.map((name) => ({ name, channel: name })));
+});
+
+app.get("/api/me", (req, res) => {
+  if (!req.session?.user) {
+    return res.status(401).json({
+      error: "Você não está conectado.",
+    });
+  }
+
+  res.json({
+    user: req.session.user,
+  });
+});
+
+// Cadastro
+app.post("/api/register", sameOrigin, async (req, res) => {
+  const username = normalizeUsername(req.body?.username);
+  const email = normalizeEmail(req.body?.email);
+  const password = req.body?.password;
+
+  if (!/^[a-zA-Z0-9_]{3,24}$/.test(username)) {
+    return res.status(400).json({
+      error:
+        "O nome de usuário deve ter de 3 a 24 caracteres, usando letras, números ou _.",
+    });
+  }
+
+  if (
+    email.length > 254 ||
+    !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
+  ) {
+    return res.status(400).json({
+      error: "Informe um e-mail válido.",
+    });
+  }
+
+  if (!validPassword(password)) {
+    return res.status(400).json({
+      error: "A senha deve ter entre 8 e 72 caracteres.",
+    });
+  }
+
+  try {
+    const passwordHash = await bcrypt.hash(password, 12);
+
+    const result = await pool.query(
+      `INSERT INTO users (username, email, password_hash)
+       VALUES ($1, $2, $3)
+       RETURNING id, username, email, created_at`,
+      [username, email, passwordHash]
+    );
+
+    const user = publicUser(result.rows[0]);
+
+    req.session.user = user;
+    await saveSession(req);
+
+    res.status(201).json({
+      ok: true,
+      user,
+    });
+  } catch (error) {
+    if (error.code === "23505") {
+      return res.status(409).json({
+        error: "Este nome de usuário ou e-mail já está cadastrado.",
+      });
+    }
+
+    console.error("Erro no cadastro:", error);
+
+    res.status(500).json({
+      error: "Não foi possível criar a conta.",
+    });
+  }
+});
+
+// Login: aceita e-mail ou nome de usuário em identifier.
+app.post("/api/login", sameOrigin, async (req, res) => {
+  const identifier =
+    typeof req.body?.identifier === "string"
+      ? req.body.identifier.trim()
+      : "";
+
+  const password = req.body?.password;
+
+  if (!identifier || typeof password !== "string") {
+    return res.status(400).json({
+      error: "Informe seu usuário ou e-mail e sua senha.",
+    });
+  }
+
+  try {
+    const result = await pool.query(
+      `SELECT id, username, email, password_hash, created_at
+       FROM users
+       WHERE LOWER(username) = LOWER($1)
+          OR LOWER(email) = LOWER($1)
+       LIMIT 1`,
+      [identifier]
+    );
+
+    const account = result.rows[0];
+
+    if (!account || !(await bcrypt.compare(password, account.password_hash))) {
+      return res.status(401).json({
+        error: "Usuário, e-mail ou senha incorretos.",
+      });
+    }
+
+    // Regenera a sessão para reduzir o risco de session fixation.
+    await new Promise((resolve, reject) => {
+      req.session.regenerate((error) => {
+        if (error) reject(error);
+        else resolve();
+      });
+    });
+
+    const user = publicUser(account);
+    req.session.user = user;
+
+    await saveSession(req);
+
+    res.json({
+      ok: true,
+      user,
+    });
+  } catch (error) {
+    console.error("Erro no login:", error);
+
+    res.status(500).json({
+      error: "Não foi possível entrar na conta.",
+    });
+  }
+});
+
+// Logout
 app.post("/api/logout", sameOrigin, (req, res) => {
-  req.session.destroy(error => {
+  if (!req.session) {
+    res.clearCookie("connect.sid", {
+      httpOnly: true,
+      sameSite: "lax",
+      secure: isProduction,
+    });
+
+    return res.json({ ok: true });
+  }
+
+  req.session.destroy((error) => {
     if (error) {
       console.error("Erro ao encerrar sessão:", error);
+
       return res.status(500).json({
-        error: "Não foi possível sair da conta."
+        error: "Não foi possível sair da conta.",
       });
     }
 
     res.clearCookie("connect.sid", {
       httpOnly: true,
       sameSite: "lax",
-      secure: process.env.NODE_ENV === "production"
+      secure: isProduction,
     });
 
     res.json({ ok: true });
   });
 });
 
-app.get("/api/messages/:channel", requireAuth, async (req, res) => {
-  const channel = req.params.channel;
+// Histórico das mensagens
+app.get(
+  "/api/messages/:channel",
+  requireAuth,
+  async (req, res) => {
+    const channel = req.params.channel;
 
-  if (!validChannel(channel)) {
-    return res.status(404).json({ error: "Canal não encontrado." });
+    if (!validChannel(channel)) {
+      return res.status(404).json({
+        error: "Canal não encontrado.",
+      });
+    }
+
+    try {
+      const messages = await getChannelMessages(channel);
+      res.json(messages);
+    } catch (error) {
+      console.error("Erro ao carregar mensagens:", error);
+
+      res.status(500).json({
+        error: "Não foi possível carregar as mensagens.",
+      });
+    }
   }
+);
 
-  try {
-    res.json(await getChannelMessages(channel));
-  } catch (error) {
-    console.error("Erro ao buscar mensagens:", error);
-    res.status(500).json({
-      error: "Não foi possível carregar as mensagens."
-    });
-  }
-});
-
-// -----------------------------------------------------------------------------
-// Socket.IO: autenticação e presença
-// -----------------------------------------------------------------------------
+// --------------------------------------------------
+// SOCKET.IO: AUTENTICAÇÃO
+// --------------------------------------------------
 
 io.use((socket, next) => {
   const user = socket.request.session?.user;
@@ -49,169 +446,82 @@ io.use((socket, next) => {
   next();
 });
 
+// --------------------------------------------------
+// SOCKET.IO: CHAT, PRESENÇA E DIGITAÇÃO
+// --------------------------------------------------
+
+const onlineSockets = new Map();
 const typingByChannel = new Map();
+const lastMessageAt = new Map();
 
-function getTypingMap(channel) {
-  if (!typingByChannel.has(channel)) {
-    typingByChannel.set(channel, new Map());
-  }
-
-  return typingByChannel.get(channel);
+function getOnlineUsers() {
+  return Array.from(onlineSockets.values()).map((user) => ({
+    id: user.id,
+    username: user.username,
+  }));
 }
 
-function broadcastTyping(channel) {
-  const users = [...new Set([...getTypingMap(channel).values()])];
-
-  io.to(channel).emit("typing users", { channel, users });
+function broadcastOnlineUsers() {
+  io.emit("online users", getOnlineUsers());
 }
 
 function removeTyping(socket, channel) {
-  const typing = typingByChannel.get(channel);
+  const users = typingByChannel.get(channel);
 
-  if (!typing) return;
+  if (!users) return;
 
-  typing.delete(socket.id);
+  users.delete(socket.id);
 
-  if (typing.size === 0) {
+  if (users.size === 0) {
     typingByChannel.delete(channel);
   }
 
-  broadcastTyping(channel);
+  io.to(channel).emit(
+    "typing users",
+    Array.from(typingByChannel.get(channel)?.values() || [])
+  );
 }
 
-async function broadcastOnlineUsers(channel) {
-  try {
-    const clients = await io.in(channel).fetchSockets();
-    const uniqueUsers = new Map();
+io.on("connection", (socket) => {
+  const user = socket.user;
 
-    for (const client of clients) {
-      if (!client.user) continue;
-
-      uniqueUsers.set(String(client.user.id), {
-        id: client.user.id,
-        username: client.user.username
-      });
-    }
-
-    io.to(channel).emit("online users", {
-      channel,
-      users: [...uniqueUsers.values()]
-    });
-  } catch (error) {
-    console.error("Erro ao atualizar usuários online:", error);
-  }
-}
-
-io.on("connection", socket => {
-  socket.data.lastMessageAt = 0;
-
-  // Sala privada por usuário para encaminhar sinalização de chamadas de voz.
-  socket.join("user:" + String(socket.user.id));
-
-  function relayCallEvent(incomingEvent, outgoingEvent) {
-    socket.on(incomingEvent, payload => {
-      const targetUserId = payload?.targetUserId;
-
-      if (
-        targetUserId === undefined ||
-        targetUserId === null ||
-        String(targetUserId) === String(socket.user.id)
-      ) {
-        return;
-      }
-
-      const forwarded = {
-        ...payload,
-        targetUserId: undefined,
-        fromUserId: socket.user.id,
-        fromUsername: socket.user.username
-      };
-
-      io.to("user:" + String(targetUserId)).emit(outgoingEvent, forwarded);
-    });
-  }
-
-  // Solicitação inicial da chamada.
-  socket.on("call:request", async (payload, callback) => {
-    const targetUserId = payload?.targetUserId;
-
-    if (
-      targetUserId === undefined ||
-      targetUserId === null ||
-      String(targetUserId) === String(socket.user.id)
-    ) {
-      return asyncReply(callback, {
-        error: "Selecione uma pessoa válida para ligar."
-      });
-    }
-
-    try {
-      const targets = await io
-        .in("user:" + String(targetUserId))
-        .fetchSockets();
-
-      if (!targets.length) {
-        return asyncReply(callback, {
-          error: "Essa pessoa não está conectada agora."
-        });
-      }
-
-      io.to("user:" + String(targetUserId)).emit("call:request", {
-        fromUserId: socket.user.id,
-        fromUsername: socket.user.username
-      });
-
-      asyncReply(callback, { ok: true });
-    } catch (error) {
-      console.error("Erro ao encaminhar chamada:", error);
-
-      asyncReply(callback, {
-        error: "Não foi possível iniciar a chamada."
-      });
-    }
+  onlineSockets.set(socket.id, {
+    id: user.id,
+    username: user.username,
   });
 
-  // Eventos de sinalização WebRTC.
-  relayCallEvent("call:accept", "call:accepted");
-  relayCallEvent("call:decline", "call:declined");
-  relayCallEvent("call:offer", "call:offer");
-  relayCallEvent("call:answer", "call:answer");
-  relayCallEvent("call:ice-candidate", "call:ice-candidate");
-  relayCallEvent("call:end", "call:ended");
-  relayCallEvent("call:busy", "call:busy");
+  broadcastOnlineUsers();
 
-  socket.on("join channel", async channel => {
+  socket.on("join channel", async (channel) => {
     if (!validChannel(channel)) {
       emitError(socket, "Canal inválido.");
       return;
     }
 
-    const previousChannel = socket.currentChannel;
-
-    if (previousChannel && previousChannel !== channel) {
-      removeTyping(socket, previousChannel);
-      socket.leave(previousChannel);
-    }
-
-    socket.join(channel);
-    socket.currentChannel = channel;
-
     try {
+      if (socket.currentChannel) {
+        const previous = socket.currentChannel;
+
+        removeTyping(socket, previous);
+        socket.leave(previous);
+      }
+
+      socket.join(channel);
+      socket.currentChannel = channel;
+
       const messages = await getChannelMessages(channel);
 
       socket.emit("channel joined", { channel });
       socket.emit("chat history", messages);
-
-      await broadcastOnlineUsers(channel);
-      broadcastTyping(channel);
     } catch (error) {
-      console.error("Erro ao carregar histórico via Socket.IO:", error);
-      emitError(socket, "Não foi possível carregar o histórico.");
+      console.error("Erro ao entrar no canal:", error);
+      emitError(socket, "Não foi possível abrir este canal.");
     }
   });
 
-  socket.on("typing", payload => {
-    const channel = payload?.channel;
+  socket.on("typing", (payload) => {
+    const channel =
+      typeof payload === "string" ? payload : payload?.channel;
 
     if (
       !validChannel(channel) ||
@@ -221,80 +531,224 @@ io.on("connection", socket => {
       return;
     }
 
-    const typing = getTypingMap(channel);
-
-    if (payload.isTyping === true) {
-      typing.set(socket.id, socket.user.username);
-    } else {
-      typing.delete(socket.id);
+    if (!typingByChannel.has(channel)) {
+      typingByChannel.set(channel, new Map());
     }
 
-    if (typing.size === 0) {
-      typingByChannel.delete(channel);
-    }
+    typingByChannel.get(channel).set(socket.id, {
+      id: user.id,
+      username: user.username,
+    });
 
-    broadcastTyping(channel);
+    io.to(channel).emit(
+      "typing users",
+      Array.from(typingByChannel.get(channel).values())
+    );
   });
 
-  // Enviar mensagens: aceita "message" e "content".
-  socket.on("send message", async (payload, callback) => {
-    try {
-      const channel = payload?.channel;
+  socket.on("stop typing", (payload) => {
+    const channel =
+      typeof payload === "string"
+        ? payload
+        : payload?.channel || socket.currentChannel;
 
-      const message = typeof payload?.message === "string"
+    if (validChannel(channel)) {
+      removeTyping(socket, channel);
+    }
+  });
+
+  socket.on("send message", async (payload, callback) => {
+    const reply = (data) => {
+      if (typeof callback === "function") callback(data);
+    };
+
+    const channel = payload?.channel;
+
+    const message =
+      typeof payload?.message === "string"
         ? payload.message.trim()
         : typeof payload?.content === "string"
           ? payload.content.trim()
           : "";
 
-      if (!validChannel(channel)) {
-        return asyncReply(callback, { error: "Canal inválido." });
-      }
+    if (!validChannel(channel)) {
+      reply({ ok: false, error: "Canal inválido." });
+      return;
+    }
 
-      if (
-        socket.currentChannel !== channel ||
-        !socket.rooms.has(channel)
-      ) {
-        return asyncReply(callback, {
-          error: "Entre no canal antes de enviar mensagens."
-        });
-      }
+    if (
+      socket.currentChannel !== channel ||
+      !socket.rooms.has(channel)
+    ) {
+      reply({
+        ok: false,
+        error: "Entre no canal antes de enviar mensagens.",
+      });
+      return;
+    }
 
-      if (!validMessage(message)) {
-        return asyncReply(callback, {
-          error: "A mensagem deve ter entre 1 e 2000 caracteres."
-        });
-      }
+    if (!validMessage(message)) {
+      reply({
+        ok: false,
+        error: "A mensagem deve ter entre 1 e 2000 caracteres.",
+      });
+      return;
+    }
 
-      const now = Date.now();
+    // Pequeno intervalo entre mensagens para reduzir spam.
+    const now = Date.now();
+    const previousTime = lastMessageAt.get(socket.id) || 0;
 
-      if (now - socket.data.lastMessageAt < MESSAGE_COOLDOWN_MS) {
-        return asyncReply(callback, {
-          error: "Espere um instante antes de enviar outra mensagem."
-        });
-      }
+    if (now - previousTime < 500) {
+      reply({
+        ok: false,
+        error: "Espere um instante antes de enviar outra mensagem.",
+      });
+      return;
+    }
 
-      socket.data.lastMessageAt = now;
+    lastMessageAt.set(socket.id, now);
 
+    try {
       const result = await pool.query(
         `INSERT INTO messages (user_id, username, message, channel)
          VALUES ($1, $2, $3, $4)
          RETURNING id, user_id, username, message, channel,
                    created_at, updated_at`,
-        [socket.user.id, socket.user.username, message, channel]
+        [user.id, user.username, message, channel]
       );
 
-      const saved = result.rows[0];
+      const savedMessage = result.rows[0];
 
-      io.to(channel).emit("chat message", saved);
+      io.to(channel).emit("chat message", savedMessage);
+
       removeTyping(socket, channel);
 
-      asyncReply(callback, { ok: true, message: saved });
+      reply({
+        ok: true,
+        message: savedMessage,
+      });
     } catch (error) {
-      console.error("Erro ao enviar mensagem:", error);
+      console.error("Erro ao salvar mensagem:", error);
 
-      asyncReply(callback, {
-        error: "Não foi possível enviar a mensagem."
+      reply({
+        ok: false,
+        error: "Não foi possível enviar a mensagem.",
       });
     }
   });
+
+  // Retransmite eventos de chamadas apenas entre usuários autenticados.
+  // O cliente deve validar a identidade e o contexto da chamada.
+  const callEvents = [
+    "call:request",
+    "call:accept",
+    "call:decline",
+    "call:offer",
+    "call:answer",
+    "call:ice-candidate",
+    "call:end",
+    "call:busy",
+  ];
+
+  for (const eventName of callEvents) {
+    socket.on(eventName, (payload = {}) => {
+      const targetId = payload?.targetId;
+
+      if (!targetId) return;
+
+      for (const [socketId, onlineUser] of onlineSockets.entries()) {
+        if (
+          String(onlineUser.id) === String(targetId) &&
+          socketId !== socket.id
+        ) {
+          io.to(socketId).emit(eventName, {
+            ...payload,
+            from: {
+              id: user.id,
+              username: user.username,
+            },
+          });
+        }
+      }
+    });
+  }
+
+  socket.on("disconnect", () => {
+    onlineSockets.delete(socket.id);
+
+    if (socket.currentChannel) {
+      removeTyping(socket, socket.currentChannel);
+    }
+
+    lastMessageAt.delete(socket.id);
+    broadcastOnlineUsers();
+  });
+});
+
+// --------------------------------------------------
+// ERROS
+// --------------------------------------------------
+
+app.use((err, req, res, next) => {
+  console.error("Erro inesperado:", err);
+
+  if (res.headersSent) {
+    return next(err);
+  }
+
+  res.status(500).json({
+    error: "Ocorreu um erro interno no servidor.",
+  });
+});
+
+// --------------------------------------------------
+// INICIALIZAÇÃO
+// --------------------------------------------------
+
+async function startServer() {
+  try {
+    if (!process.env.DATABASE_URL) {
+      throw new Error(
+        "DATABASE_URL não foi definida no arquivo .env."
+      );
+    }
+
+    if (
+      isProduction &&
+      (!process.env.SESSION_SECRET ||
+        process.env.SESSION_SECRET.length < 32)
+    ) {
+      throw new Error(
+        "Defina SESSION_SECRET com pelo menos 32 caracteres no ambiente de produção."
+      );
+    }
+
+    await pool.query("SELECT 1");
+    await initializeDatabase();
+
+    server.listen(PORT, () => {
+      console.log(`NEXO rodando na porta ${PORT}`);
+      console.log(`Ambiente: ${process.env.NODE_ENV || "development"}`);
+    });
+  } catch (error) {
+    console.error("Não foi possível iniciar o NEXO:", error.message);
+    process.exit(1);
+  }
+}
+
+process.on("SIGTERM", async () => {
+  server.close(async () => {
+    await pool.end();
+    process.exit(0);
+  });
+});
+
+process.on("SIGINT", async () => {
+  server.close(async () => {
+    await pool.end();
+    process.exit(0);
+  });
+});
+
+startServer();
