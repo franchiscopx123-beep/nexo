@@ -9,6 +9,7 @@ let currentChannel = "geral";
 let socket = null;
 let toastTimer;
 let toastMessageTimer;
+let authSubmitting = false;
 
 const channelDescriptions = {
   geral: "Um espaço para conversar e compartilhar ideias.",
@@ -17,15 +18,32 @@ const channelDescriptions = {
   conversa: "Um lugar para conversas descontraídas."
 };
 
+const defaultSettings = {
+  accent: "#8b5cf6",
+  theme: "dark",
+  font: "inter",
+  fontSize: 16
+};
+
 async function api(url, options = {}) {
-  const response = await fetch(url, {
-    credentials: "same-origin",
-    ...options,
-    headers: {
-      ...(options.body ? { "Content-Type": "application/json" } : {}),
-      ...options.headers
-    }
-  });
+  let response;
+
+  try {
+    response = await fetch(url, {
+      credentials: "same-origin",
+      ...options,
+      headers: {
+        ...(options.body
+          ? { "Content-Type": "application/json" }
+          : {}),
+        ...options.headers
+      }
+    });
+  } catch {
+    throw new Error(
+      "Não foi possível conectar ao servidor. Verifique se o NEXO está ligado."
+    );
+  }
 
   const data = await response.json().catch(() => ({}));
 
@@ -42,7 +60,7 @@ function showToast(message) {
   const toast = $("#toast");
 
   if (!toast) {
-    console.info(message);
+    console.info("NEXO:", message);
     return;
   }
 
@@ -50,14 +68,25 @@ function showToast(message) {
   toast.classList.add("show");
 
   clearTimeout(toastTimer);
+
   toastTimer = setTimeout(() => {
     toast.classList.remove("show");
-  }, 2800);
+  }, 3000);
+}
+
+function showAuthError(message) {
+  const error = $("#authError");
+
+  if (error) {
+    error.textContent = message;
+  } else {
+    showToast(message);
+  }
 }
 
 function validatePassword(password) {
-  if (password.length < 6) {
-    return "A senha deve ter pelo menos 6 caracteres.";
+  if (password.length < 8) {
+    return "A senha deve ter pelo menos 8 caracteres.";
   }
 
   if (new TextEncoder().encode(password).length > 72) {
@@ -83,30 +112,36 @@ function validatePassword(password) {
   return "";
 }
 
+/* AUTENTICAÇÃO */
+
 function setAuthMode(mode) {
   authMode = mode === "register" ? "register" : "login";
 
   const registering = authMode === "register";
-  const loginTab = $("#loginTab");
-  const registerTab = $("#registerTab");
-  const username = $("#username");
-  const usernameLabel = $("#usernameLabel");
-  const identifier = $("#identifier");
-  const password = $("#password");
-  const passwordHint = $("#passwordHint");
-  const submitButton = $("#authSubmit");
-  const authError = $("#authError");
 
-  loginTab?.classList.toggle("active", !registering);
-  registerTab?.classList.toggle("active", registering);
+  $("#loginTab")?.classList.toggle("active", !registering);
+  $("#registerTab")?.classList.toggle("active", registering);
+
+  const username = $("#username");
+
+  // Compatibilidade com diferentes versões do index.html.
+  const usernameContainer =
+    $("#usernameField") ||
+    $("#usernameLabel") ||
+    username?.closest("label");
 
   if (username) {
     username.required = registering;
     username.disabled = !registering;
+  }
+
+  usernameContainer?.classList.toggle("hidden", !registering);
+
+  if (username && !usernameContainer) {
     username.classList.toggle("hidden", !registering);
   }
 
-  usernameLabel?.classList.toggle("hidden", !registering);
+  const identifier = $("#identifier");
 
   if (identifier) {
     identifier.placeholder = registering
@@ -116,99 +151,103 @@ function setAuthMode(mode) {
     identifier.autocomplete = registering ? "email" : "username";
   }
 
+  const password = $("#password");
+
   if (password) {
     password.autocomplete = registering
       ? "new-password"
       : "current-password";
 
-    password.minLength = registering ? 6 : 1;
+    password.minLength = registering ? 8 : 1;
     password.maxLength = 72;
   }
 
-  if (passwordHint) {
-    passwordHint.textContent = registering
-      ? "Mínimo de 6 caracteres: maiúscula, minúscula, número e símbolo."
+  const hint = $("#passwordHint");
+
+  if (hint) {
+    hint.textContent = registering
+      ? "Use 8+ caracteres, maiúscula, minúscula, número e símbolo."
       : "Digite sua senha.";
   }
 
-  if (submitButton) {
-    submitButton.textContent = registering
-      ? "Criar minha conta"
-      : "Entrar no NEXO";
+  const submit = $("#authSubmit");
 
-    submitButton.disabled = false;
+  if (submit) {
+    submit.textContent = registering
+      ? "Criar minha conta →"
+      : "Entrar no NEXO →";
+
+    submit.disabled = false;
   }
 
-  if (authError) authError.textContent = "";
+  const error = $("#authError");
+
+  if (error) {
+    error.textContent = "";
+  }
 }
 
-// Permite que os botões do HTML chamem diretamente esta função.
-window.nexoSetAuthMode = function (mode) {
-  setAuthMode(mode);
-};
+window.nexoSetAuthMode = setAuthMode;
 
 function setupAuthTabs() {
-  const loginTab = $("#loginTab");
-  const registerTab = $("#registerTab");
-
-  loginTab?.addEventListener("click", (event) => {
+  $("#loginTab")?.addEventListener("click", (event) => {
     event.preventDefault();
     setAuthMode("login");
   });
 
-  registerTab?.addEventListener("click", (event) => {
+  $("#registerTab")?.addEventListener("click", (event) => {
     event.preventDefault();
     setAuthMode("register");
   });
 }
 
 function setupAuthForm() {
-  const authForm = $("#authForm");
+  const form = $("#authForm");
 
-  if (!authForm) {
-    console.error("NEXO: formulário #authForm não encontrado.");
+  if (!form) {
+    console.error("NEXO: elemento #authForm não encontrado.");
     return;
   }
 
-  authForm.addEventListener("submit", async (event) => {
+  form.addEventListener("submit", async (event) => {
     event.preventDefault();
 
-    const authError = $("#authError");
+    if (authSubmitting) return;
+
     const button = $("#authSubmit");
     const identifier = $("#identifier")?.value.trim() || "";
     const password = $("#password")?.value || "";
     const username = $("#username")?.value.trim() || "";
 
-    if (authError) authError.textContent = "";
+    showAuthError("");
+
+    if (!identifier || !password) {
+      showAuthError("Preencha o e-mail/usuário e a senha.");
+      return;
+    }
 
     if (authMode === "register") {
       if (!/^[a-zA-Z0-9_]{3,24}$/.test(username)) {
-        if (authError) {
-          authError.textContent =
-            "Use um nome de 3 a 24 caracteres: letras, números ou _.";
-        }
+        showAuthError(
+          "O usuário deve ter 3 a 24 caracteres: letras, números ou _."
+        );
         return;
       }
 
       if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(identifier)) {
-        if (authError) authError.textContent = "Digite um e-mail válido.";
+        showAuthError("Digite um endereço de e-mail válido.");
         return;
       }
 
       const passwordError = validatePassword(password);
 
       if (passwordError) {
-        if (authError) authError.textContent = passwordError;
+        showAuthError(passwordError);
         return;
       }
     }
 
-    if (!identifier || !password) {
-      if (authError) {
-        authError.textContent = "Preencha o e-mail/usuário e a senha.";
-      }
-      return;
-    }
+    authSubmitting = true;
 
     if (button) {
       button.disabled = true;
@@ -216,41 +255,51 @@ function setupAuthForm() {
     }
 
     try {
-      let result;
+      const registering = authMode === "register";
 
-      if (authMode === "register") {
-        result = await api("/api/register", {
+      const result = await api(
+        registering ? "/api/register" : "/api/login",
+        {
           method: "POST",
-          body: JSON.stringify({
-            username,
-            email: identifier,
-            password
-          })
-        });
-      } else {
-        result = await api("/api/login", {
-          method: "POST",
-          body: JSON.stringify({
-            identifier,
-            password
-          })
-        });
+          body: JSON.stringify(
+            registering
+              ? {
+                  username,
+                  email: identifier,
+                  password
+                }
+              : {
+                  identifier,
+                  password
+                }
+          )
+        }
+      );
+
+      if (!result.user || !result.user.username) {
+        throw new Error("O servidor não retornou os dados da conta.");
       }
 
       currentUser = result.user;
+
       await enterApp();
     } catch (error) {
-      if (authError) authError.textContent = error.message;
+      showAuthError(error.message || "Erro ao autenticar.");
     } finally {
+      authSubmitting = false;
+
       if (button) {
         button.disabled = false;
-        button.textContent = authMode === "register"
-          ? "Criar minha conta"
-          : "Entrar no NEXO";
+        button.textContent =
+          authMode === "register"
+            ? "Criar minha conta →"
+            : "Entrar no NEXO →";
       }
     }
   });
 }
+
+/* APLICAÇÃO */
 
 async function enterApp() {
   if (!currentUser) return;
@@ -273,23 +322,35 @@ async function enterApp() {
     await loadChannels();
     connectSocket();
   } catch (error) {
-    console.error("Erro ao carregar os canais:", error.message);
-    showToast("Erro ao carregar os canais. Atualize a página.");
+    console.error("Erro ao abrir o NEXO:", error);
+    showToast(error.message || "Erro ao carregar o chat.");
   }
 }
+
+/* CANAIS */
 
 async function loadChannels() {
   const channels = await api("/api/channels");
   const list = $("#channelList");
 
-  if (!list) return;
+  if (!list) {
+    console.error("NEXO: elemento #channelList não encontrado.");
+    return;
+  }
+
+  if (!Array.isArray(channels)) {
+    throw new Error("A lista de canais retornada pelo servidor é inválida.");
+  }
 
   list.replaceChildren();
 
-  for (const item of channels) {
-    const channel = typeof item === "string"
-      ? { id: item, name: item, icon: "#" }
-      : item;
+  channels.forEach((item) => {
+    const channel =
+      typeof item === "string"
+        ? { id: item, name: item, icon: "#" }
+        : item;
+
+    if (!channel?.id) return;
 
     const button = document.createElement("button");
     button.type = "button";
@@ -297,15 +358,32 @@ async function loadChannels() {
     button.dataset.channel = channel.id;
 
     const icon = document.createElement("span");
-    icon.className = "channel-hash";
+
+    // Compatibilidade com as duas versões de CSS.
+    icon.className = "channel-icon channel-hash";
     icon.textContent = channel.icon || "#";
 
     const name = document.createElement("span");
     name.textContent = channel.name || channel.id;
 
     button.append(icon, name);
-    button.addEventListener("click", () => selectChannel(channel.id));
+
+    button.addEventListener("click", () => {
+      selectChannel(channel.id);
+    });
+
     list.append(button);
+  });
+
+  if (!channels.some((item) => {
+    const id = typeof item === "string" ? item : item?.id;
+    return id === currentChannel;
+  })) {
+    currentChannel = channels.length
+      ? (typeof channels[0] === "string"
+          ? channels[0]
+          : channels[0].id)
+      : "geral";
   }
 
   updateChannelHeader();
@@ -316,13 +394,21 @@ function updateChannelHeader() {
     `.channel-btn[data-channel="${currentChannel}"]`
   );
 
+  const channelName =
+    button?.querySelector("span:last-child")?.textContent ||
+    currentChannel;
+
+  const channelIcon =
+    button?.querySelector(".channel-icon, .channel-hash")?.textContent ||
+    "#";
+
   if ($("#channelName")) {
-    $("#channelName").textContent = button
-      ? button.querySelector("span:last-child").textContent
-      : currentChannel;
+    $("#channelName").textContent = channelName;
   }
 
-  if ($("#channelIcon")) $("#channelIcon").textContent = "#";
+  if ($("#channelIcon")) {
+    $("#channelIcon").textContent = channelIcon;
+  }
 
   if ($("#channelDescription")) {
     $("#channelDescription").textContent =
@@ -339,6 +425,8 @@ function updateChannelHeader() {
 }
 
 function selectChannel(channel) {
+  if (!channel || channel === currentChannel) return;
+
   currentChannel = channel;
 
   updateChannelHeader();
@@ -347,12 +435,13 @@ function selectChannel(channel) {
   addWelcomeMessage();
 
   if (socket?.connected) {
-    socket.emit("join channel", channel);
+    socket.emit("join channel", currentChannel);
   }
 }
 
 function addWelcomeMessage() {
   const messages = $("#messages");
+
   if (!messages) return;
 
   const welcome = document.createElement("div");
@@ -373,10 +462,14 @@ function addWelcomeMessage() {
   messages.append(welcome);
 }
 
+/* MENSAGENS */
+
 function addMessage(message) {
+  if (!message || message.channel !== currentChannel) return;
+
   const messages = $("#messages");
 
-  if (!messages || message.channel !== currentChannel) return;
+  if (!messages) return;
 
   messages.querySelector(".welcome-card")?.remove();
 
@@ -386,7 +479,8 @@ function addMessage(message) {
   const avatar = document.createElement("div");
   avatar.className = "message-avatar";
   avatar.textContent = String(message.username || "?")
-    .charAt(0).toUpperCase();
+    .charAt(0)
+    .toUpperCase();
 
   const body = document.createElement("div");
   body.className = "message-body";
@@ -400,17 +494,17 @@ function addMessage(message) {
   const time = document.createElement("time");
   const date = new Date(message.created_at);
 
-  time.dateTime = Number.isNaN(date.getTime()) ? "" : date.toISOString();
-  time.textContent = Number.isNaN(date.getTime())
-    ? ""
-    : date.toLocaleTimeString("pt-BR", {
-        hour: "2-digit",
-        minute: "2-digit"
-      });
+  if (!Number.isNaN(date.getTime())) {
+    time.dateTime = date.toISOString();
+    time.textContent = date.toLocaleTimeString("pt-BR", {
+      hour: "2-digit",
+      minute: "2-digit"
+    });
+  }
 
   const text = document.createElement("div");
   text.className = "message-text";
-  text.textContent = message.message;
+  text.textContent = String(message.message || "");
 
   meta.append(username, time);
   body.append(meta, text);
@@ -420,14 +514,20 @@ function addMessage(message) {
   messages.scrollTop = messages.scrollHeight;
 }
 
+/* SOCKET.IO */
+
 function connectSocket() {
-  if (typeof io !== "function") {
-    showToast("Não foi possível carregar o chat.");
+  if (typeof window.io !== "function") {
+    showToast("Socket.IO não carregou. Confira o servidor.");
     return;
   }
 
-  if (socket) socket.disconnect();
-  socket = io();
+  if (socket) {
+    socket.removeAllListeners();
+    socket.disconnect();
+  }
+
+  socket = window.io();
 
   socket.on("connect", () => {
     $("#connectionBanner")?.classList.add("hidden");
@@ -440,80 +540,112 @@ function connectSocket() {
 
   socket.on("connect_error", (error) => {
     $("#connectionBanner")?.classList.remove("hidden");
-    console.error("Falha na conexão:", error.message);
+    console.error("Falha na conexão Socket.IO:", error.message);
   });
 
   socket.on("chat history", (history) => {
-    $("#messages")?.replaceChildren();
-    addWelcomeMessage();
+    const messages = $("#messages");
+
+    if (!messages) return;
+
+    messages.replaceChildren();
+
+    if (!Array.isArray(history) || history.length === 0) {
+      addWelcomeMessage();
+      return;
+    }
+
     history.forEach(addMessage);
   });
 
   socket.on("chat message", addMessage);
 
   socket.on("chat error", (message) => {
-    const error = $("#chatError");
-    if (error) error.textContent = message;
-
-    clearTimeout(toastMessageTimer);
-
-    toastMessageTimer = setTimeout(() => {
-      if (error) error.textContent = "";
-    }, 3500);
+    showToast(
+      typeof message === "string"
+        ? message
+        : "Não foi possível enviar a mensagem."
+    );
   });
 }
 
-$("#messageForm")?.addEventListener("submit", (event) => {
-  event.preventDefault();
+/* ENVIO DE MENSAGENS */
 
-  const input = $("#messageInput");
-  const message = input?.value.trim() || "";
+function setupMessageForm() {
+  $("#messageForm")?.addEventListener("submit", (event) => {
+    event.preventDefault();
 
-  if (!message || !socket?.connected) {
-    if (!socket?.connected) showToast("Reconectando ao chat...");
-    return;
-  }
+    const input = $("#messageInput");
+    const message = input?.value.trim() || "";
 
-  socket.emit("send message", {
-    channel: currentChannel,
-    message
+    if (!message) return;
+
+    if (message.length > 1000) {
+      showToast("A mensagem pode ter no máximo 1000 caracteres.");
+      return;
+    }
+
+    if (!socket?.connected) {
+      showToast("Reconectando ao chat. Tente novamente.");
+      return;
+    }
+
+    socket.emit("send message", {
+      channel: currentChannel,
+      message
+    });
+
+    if (input) {
+      input.value = "";
+      input.focus();
+    }
   });
 
-  input.value = "";
-  input.focus();
-});
+  $("#emojiButton")?.addEventListener("click", (event) => {
+    event.preventDefault();
 
-$("#emojiButton")?.addEventListener("click", (event) => {
-  event.preventDefault();
+    const input = $("#messageInput");
 
-  const input = $("#messageInput");
-  if (!input) return;
+    if (!input) return;
 
-  input.value += " 😊";
-  input.focus();
-});
+    input.value += " 😊";
+    input.focus();
+  });
+}
 
-$("#logoutButton")?.addEventListener("click", async (event) => {
-  event.preventDefault();
+/* SAIR DA CONTA */
 
-  try {
-    await api("/api/logout", { method: "POST" });
+function setupLogout() {
+  $("#logoutButton")?.addEventListener("click", async (event) => {
+    event.preventDefault();
 
-    socket?.disconnect();
-    socket = null;
-    currentUser = null;
+    const button = $("#logoutButton");
 
-    $("#appView")?.classList.add("hidden");
-    $("#authView")?.classList.remove("hidden");
+    if (button) button.disabled = true;
 
-    $("#authForm")?.reset();
-    setAuthMode("login");
+    try {
+      await api("/api/logout", { method: "POST" });
 
-    showToast("Você saiu da sua conta.");
-  } catch (error) {
-    showToast(error.message);
-  }
-});
+      socket?.disconnect();
+      socket = null;
+      currentUser = null;
+
+      $("#appView")?.classList.add("hidden");
+      $("#authView")?.classList.remove("hidden");
+
+      $("#authForm")?.reset();
+
+      setAuthMode("login");
+      showToast("Você saiu da sua conta.");
+    } catch (error) {
+      showToast(error.message);
+    } finally {
+      if (button) button.disabled = false;
+    }
+  });
+}
+
+/* CONFIGURAÇÕES VISUAIS */
 
 function openSettings() {
   $("#settingsPanel")?.classList.remove("hidden");
@@ -523,136 +655,139 @@ function closeSettings() {
   $("#settingsPanel")?.classList.add("hidden");
 }
 
-$("#settingsButton")?.addEventListener("click", openSettings);
-$("#themeShortcut")?.addEventListener("click", openSettings);
-$("#closeSettings")?.addEventListener("click", closeSettings);
-$("#closeRightPanel")?.addEventListener("click", closeSettings);
+function setupSettings() {
+  $("#settingsButton")?.addEventListener("click", openSettings);
+  $("#themeShortcut")?.addEventListener("click", openSettings);
+  $("#closeSettings")?.addEventListener("click", closeSettings);
+  $("#closeRightPanel")?.addEventListener("click", closeSettings);
 
-function validColor(value) {
-  return /^#[0-9a-f]{6}$/i.test(value) ? value : "#8b5cf6";
+  $("#settingsPanel")?.addEventListener("click", (event) => {
+    if (event.target.id === "settingsPanel") {
+      closeSettings();
+    }
+  });
+
+  $("#fontSize")?.addEventListener("input", () => {
+    applySettings(readSettings());
+  });
+
+  $("#accentColor")?.addEventListener("input", () => {
+    applySettings(readSettings());
+  });
+
+  $("#themeSelect")?.addEventListener("change", () => {
+    applySettings(readSettings());
+  });
+
+  $("#fontSelect")?.addEventListener("change", () => {
+    applySettings(readSettings());
+  });
+
+  $("#saveSettings")?.addEventListener("click", (event) => {
+    event.preventDefault();
+
+    try {
+      const settings = readSettings();
+
+      localStorage.setItem(
+        "nexo-settings",
+        JSON.stringify(settings)
+      );
+
+      applySettings(settings);
+
+      if ($("#settingsMessage")) {
+        $("#settingsMessage").textContent =
+          "Preferências salvas neste navegador.";
+      }
+
+      showToast("Personalização salva!");
+    } catch {
+      showToast("Não foi possível salvar as configurações.");
+    }
+  });
+
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") closeSettings();
+  });
+}
+
+function readSettings() {
+  return {
+    accent: $("#accentColor")?.value || defaultSettings.accent,
+    theme: $("#themeSelect")?.value || defaultSettings.theme,
+    font: $("#fontSelect")?.value || defaultSettings.font,
+    fontSize: Number($("#fontSize")?.value) || defaultSettings.fontSize
+  };
 }
 
 function applySettings(settings) {
-  document.documentElement.style.setProperty(
-    "--accent",
-    validColor(settings.accent)
+  const allowedThemes = ["dark", "midnight", "light"];
+  const allowedFonts = ["inter", "serif", "mono"];
+
+  const theme = allowedThemes.includes(settings.theme)
+    ? settings.theme
+    : "dark";
+
+  const font = allowedFonts.includes(settings.font)
+    ? settings.font
+    : "inter";
+
+  const fontSize = Math.max(
+    14,
+    Math.min(20, Number(settings.fontSize) || 16)
   );
 
+  const accent = /^#[0-9a-f]{6}$/i.test(settings.accent || "")
+    ? settings.accent
+    : defaultSettings.accent;
+
+  document.documentElement.style.setProperty("--accent", accent);
   document.documentElement.style.setProperty(
     "--font-size",
-    `${Math.max(14, Math.min(20, Number(settings.fontSize) || 16)}px`
+    `${fontSize}px`
   );
 
   document.body.classList.remove(
     "dark", "midnight", "light", "serif", "mono"
   );
 
-  document.body.classList.add(
-    ["dark", "midnight", "light"].includes(settings.theme)
-      ? settings.theme
-      : "dark"
-  );
+  document.body.classList.add(theme);
 
-  if (settings.font === "serif") {
+  if (font === "serif") {
     document.body.classList.add("serif");
-  }
-
-  if (settings.font === "mono") {
+  } else if (font === "mono") {
     document.body.classList.add("mono");
   }
 
-  if ($("#accentColor")) {
-    $("#accentColor").value = validColor(settings.accent);
-  }
-
-  if ($("#themeSelect")) {
-    $("#themeSelect").value = settings.theme || "dark";
-  }
-
-  if ($("#fontSelect")) {
-    $("#fontSelect").value = settings.font || "inter";
-  }
-
-  if ($("#fontSize")) {
-    $("#fontSize").value = settings.fontSize || 16;
-  }
+  if ($("#accentColor")) $("#accentColor").value = accent;
+  if ($("#themeSelect")) $("#themeSelect").value = theme;
+  if ($("#fontSelect")) $("#fontSelect").value = font;
+  if ($("#fontSize")) $("#fontSize").value = fontSize;
 
   if ($("#fontSizeLabel")) {
-    $("#fontSizeLabel").textContent =
-      `${$("#fontSize")?.value || 16} px`;
+    $("#fontSizeLabel").textContent = `${fontSize} px`;
   }
-}
-
-function readSettings() {
-  return {
-    accent: $("#accentColor")?.value || "#8b5cf6",
-    theme: $("#themeSelect")?.value || "dark",
-    font: $("#fontSelect")?.value || "inter",
-    fontSize: Number($("#fontSize")?.value) || 16
-  };
 }
 
 function applySavedSettings() {
-  let settings = {};
+  let saved = {};
 
   try {
-    settings = JSON.parse(
+    saved = JSON.parse(
       localStorage.getItem("nexo-settings") || "{}"
     );
   } catch {
-    settings = {};
+    saved = {};
   }
 
   applySettings({
-    accent: settings.accent || "#8b5cf6",
-    theme: settings.theme || "dark",
-    font: settings.font || "inter",
-    fontSize: settings.fontSize || 16
+    ...defaultSettings,
+    ...saved
   });
 }
 
-$("#fontSize")?.addEventListener("input", () => {
-  if ($("#fontSizeLabel")) {
-    $("#fontSizeLabel").textContent = `${$("#fontSize").value} px`;
-  }
-
-  applySettings(readSettings());
-});
-
-$("#accentColor")?.addEventListener("input", () => {
-  applySettings(readSettings());
-});
-
-$("#themeSelect")?.addEventListener("change", () => {
-  applySettings(readSettings());
-});
-
-$("#fontSelect")?.addEventListener("change", () => {
-  applySettings(readSettings());
-});
-
-$("#saveSettings")?.addEventListener("click", (event) => {
-  event.preventDefault();
-
-  try {
-    const settings = readSettings();
-
-    localStorage.setItem("nexo-settings", JSON.stringify(settings));
-    applySettings(settings);
-
-    if ($("#settingsMessage")) {
-      $("#settingsMessage").textContent =
-        "Aparência salva neste navegador.";
-    }
-
-    showToast("Personalização aplicada!");
-  } catch {
-    if ($("#settingsMessage")) {
-      $("#settingsMessage").textContent =
-        "Não foi possível salvar as configurações.";
-    }
-  }
-});
+/* INICIALIZAÇÃO */
 
 async function restoreSession() {
   try {
@@ -663,24 +798,26 @@ async function restoreSession() {
       await enterApp();
     }
   } catch (error) {
-    console.error("Erro ao restaurar a sessão:", error.message);
+    console.error("Erro ao restaurar sessão:", error.message);
   }
 }
 
 function initialize() {
   setupAuthTabs();
   setupAuthForm();
-  setAuthMode("login");
+  setupMessageForm();
+  setupLogout();
+  setupSettings();
 
-  if (!$("#loginTab") || !$("#registerTab")) {
-    console.error("NEXO: botões de autenticação não encontrados.");
-  }
+  setAuthMode("login");
 
   restoreSession();
 }
 
 if (document.readyState === "loading") {
-  document.addEventListener("DOMContentLoaded", initialize, { once: true });
+  document.addEventListener("DOMContentLoaded", initialize, {
+    once: true
+  });
 } else {
   initialize();
 }
