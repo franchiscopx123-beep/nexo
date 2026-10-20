@@ -188,8 +188,9 @@ function publicUser(user) {
 }
 
 function emitError(socket, message) {
-  socket.emit("chat error", { error: message });
+  socket.emit("error message", { error: message });
 }
+
 
 function saveSession(req) {
   return new Promise((resolve, reject) => {
@@ -454,11 +455,18 @@ const onlineSockets = new Map();
 const typingByChannel = new Map();
 const lastMessageAt = new Map();
 
+
 function getOnlineUsers() {
-  return Array.from(onlineSockets.values()).map((user) => ({
-    id: user.id,
-    username: user.username,
-  }));
+  const uniqueUsers = new Map();
+
+  for (const user of onlineSockets.values()) {
+    uniqueUsers.set(String(user.id), {
+      id: user.id,
+      username: user.username,
+    });
+  }
+
+  return Array.from(uniqueUsers.values());
 }
 
 function broadcastOnlineUsers() {
