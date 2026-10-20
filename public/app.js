@@ -1,577 +1,944 @@
 
 "use strict";
 
-const $ = (selector) => document.querySelector(selector);
+/* ========================================
+   NEXO CHAT — APP.JS
+   Login, cadastro, senhas, chat e canais
+======================================== */
 
-const authView = $("#authView");
-const appView = $("#appView");
-const authForm = $("#authForm");
-const authTitle = $("#authTitle");
-const authDescription = $("#authDescription");
-const usernameInput = $("#username");
-const usernameLabel = $("#usernameLabel");
-const identifierInput = $("#identifier");
-const passwordInput = $("#password");
-const authSubmit = $("#authSubmit");
-const authMessage = $("#authMessage");
-const passwordHint = $("#passwordHint");
-const loginTab = $("#loginTab");
-const registerTab = $("#registerTab");
+(() => {
+  const $ = (selector) => document.querySelector(selector);
 
-const currentUsername = $("#currentUsername");
-const userAvatar = $("#userAvatar");
-const channelList = $("#channelList");
-const channelName = $("#channelName");
-const channelIcon = $("#channelIcon");
-const channelDescription = $("#channelDescription");
-const messages = $("#messages");
-const messageForm = $("#messageForm");
-const messageInput = $("#messageInput");
-const connectionBanner = $("#connectionBanner");
-const connectionDot = $("#connectionDot");
-const settingsPanel = $("#settingsPanel");
-const settingsMessage = $("#settingsMessage");
+  const socket = typeof window.io === "function" ? window.io() : null;
 
-let authMode = "login";
-let currentUser = null;
-let currentChannel = "geral";
-let socket = null;
-let joinedChannel = null;
-let messageCache = new Map();
-let channels = [];
-let isSending = false;
+  const elements = {
+    authView: $("#authView"),
+    appView: $("#appView"),
 
-const channelInfo = {
-  geral: {
-    title: "geral",
-    description: "Converse com toda a comunidade.",
-    icon: "#"
-  },
-  jogos: {
-    title: "jogos",
-    description: "Jogos, partidas e tudo sobre games.",
-    icon: "🎮"
-  },
-  tecnologia: {
-    title: "tecnologia",
-    description: "Novidades, ideias e tecnologia.",
-    icon: "⌘"
-  },
-  conversa: {
-    title: "conversa",
-    description: "Um espaço para conversar à vontade.",
-    icon: "☕"
+    authForm: $("#authForm"),
+    authSubmit: $("#authSubmit"),
+    authMessage: $("#authMessage"),
+
+    usernameGroup: $("#usernameGroup"),
+    username: $("#username"),
+
+    identifier: $("#identifier"),
+    identifierLabel: $("#identifierLabel"),
+
+    password: $("#password"),
+    togglePassword: $("#togglePassword"),
+    passwordHint: $("#passwordHint"),
+
+    confirmPasswordGroup: $("#confirmPasswordGroup"),
+    confirmPassword: $("#confirmPassword"),
+    toggleConfirmPassword: $("#toggleConfirmPassword"),
+    confirmPasswordMessage: $("#confirmPasswordMessage"),
+
+    currentUsername: $("#currentUsername"),
+    currentChannel: $("#currentChannel"),
+
+    channelList: $("#channelList"),
+    messages: $("#messages"),
+
+    messageForm: $("#messageForm"),
+    messageInput: $("#messageInput"),
+    sendButton: $("#sendButton"),
+
+    logoutButton: $("#logoutButton"),
+    settingsButton: $("#settingsButton"),
+    settingsPanel: $("#settingsPanel"),
+    settingsContent: $("#settingsContent"),
+  };
+
+  let registering = false;
+  let currentUser = null;
+  let currentChannel = "geral";
+  let joinedChannel = null;
+  let channels = ["geral", "jogos", "tecnologia", "conversa"];
+  let authBusy = false;
+  let sendingMessage = false;
+  let settingsOpen = false;
+
+  const $all = (selector) => Array.from(document.querySelectorAll(selector));
+
+  /* ========================================
+     UTILITÁRIOS
+  ======================================== */
+
+  function setText(element, text) {
+    if (element) element.textContent = text;
   }
-};
 
-function setMessage(element, text, type = "") {
-  if (!element) return;
-  element.textContent = text || "";
-  element.classList.remove("error", "success");
-  if (type) element.classList.add(type);
-}
+  function setMessage(element, text, type = "") {
+    if (!element) return;
 
-async function api(url, options = {}) {
-  const response = await fetch(url, {
-    credentials: "same-origin",
-    ...options,
-    headers: {
-      "Content-Type": "application/json",
-      ...(options.headers || {})
+    element.textContent = text;
+    element.classList.remove("error", "success", "invalid", "valid");
+
+    if (type) element.classList.add(type);
+
+    if (type === "error") {
+      element.setAttribute("role", "alert");
+    } else {
+      element.removeAttribute("role");
     }
-  });
-
-  const data = await response.json().catch(() => ({}));
-
-  if (!response.ok) {
-    throw new Error(data.error || data.message || "Não foi possível concluir a operação.");
   }
 
-  return data;
-}
+  async function request(url, options = {}) {
+    const response = await fetch(url, {
+      credentials: "same-origin",
+      ...options,
+      headers: {
+        ...(options.body ? { "Content-Type": "application/json" } : {}),
+        ...(options.headers || {}),
+      },
+    });
 
-function setAuthMode(mode) {
-  authMode = mode;
-  const registering = mode === "register";
+    const data = await response.json().catch(() => ({}));
 
-  loginTab.classList.toggle("active", !registering);
-  registerTab.classList.toggle("active", registering);
+    if (!response.ok) {
+      throw new Error(data.error || data.message || "Ocorreu um erro.");
+    }
 
-  authTitle.textContent = registering ? "Crie sua conta" : "Bem-vindo de volta";
-  authDescription.textContent = registering
-    ? "Entre para fazer parte da comunidade."
-    : "Entre para continuar suas conversas.";
-
-  usernameInput.hidden = !registering;
-  usernameLabel.hidden = !registering;
-  usernameInput.required = registering;
-  identifierInput.autocomplete = registering ? "email" : "username";
-  identifierInput.placeholder = registering
-    ? "Seu e-mail"
-    : "Digite seu usuário ou e-mail";
-
-  authSubmit.textContent = registering ? "Criar conta" : "Entrar";
-  passwordInput.autocomplete = registering ? "new-password" : "current-password";
-  passwordHint.hidden = !registering;
-  setMessage(authMessage, "");
-}
-
-loginTab.addEventListener("click", () => setAuthMode("login"));
-registerTab.addEventListener("click", () => setAuthMode("register"));
-
-function validatePassword(password) {
-  if (password.length < 8) {
-    return "A senha deve ter pelo menos 8 caracteres.";
-  }
-  if (!/[a-z]/.test(password)) {
-    return "Inclua pelo menos uma letra minúscula.";
-  }
-  if (!/[A-Z]/.test(password)) {
-    return "Inclua pelo menos uma letra maiúscula.";
-  }
-  if (!/[0-9]/.test(password)) {
-    return "Inclua pelo menos um número.";
-  }
-  if (!/[^A-Za-z0-9]/.test(password)) {
-    return "Inclua pelo menos um símbolo.";
-  }
-  return "";
-}
-
-authForm.addEventListener("submit", async (event) => {
-  event.preventDefault();
-  setMessage(authMessage, "");
-
-  const identifier = identifierInput.value.trim();
-  const password = passwordInput.value;
-
-  if (!identifier || !password) {
-    setMessage(authMessage, "Preencha os campos obrigatórios.", "error");
-    return;
+    return data;
   }
 
-  if (authMode === "register") {
-    const username = usernameInput.value.trim();
+  function showView(view) {
+    if (elements.authView) {
+      elements.authView.hidden = view !== "auth";
+    }
+
+    if (elements.appView) {
+      elements.appView.hidden = view !== "app";
+    }
+  }
+
+  function escapeText(value) {
+    return String(value ?? "");
+  }
+
+  function formatTime(value) {
+    if (!value) return "";
+
+    const date = new Date(value);
+
+    if (Number.isNaN(date.getTime())) return "";
+
+    return date.toLocaleTimeString("pt-BR", {
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  }
+
+  function formatChannelName(channel) {
+    return channel.charAt(0).toUpperCase() + channel.slice(1);
+  }
+
+  /* ========================================
+     LOGIN E CADASTRO
+  ======================================== */
+
+  function setAuthMode(isRegistering) {
+    registering = Boolean(isRegistering);
+
+    const usernameGroup = elements.usernameGroup;
+    const username = elements.username;
+    const identifierLabel = elements.identifierLabel;
+    const identifier = elements.identifier;
+    const passwordHint = elements.passwordHint;
+    const confirmGroup = elements.confirmPasswordGroup;
+    const submit = elements.authSubmit;
+
+    if (usernameGroup) {
+      usernameGroup.hidden = !registering;
+    } else if (username) {
+      username.hidden = !registering;
+    }
+
+    if (username) {
+      username.required = registering;
+    }
+
+    if (identifierLabel) {
+      identifierLabel.textContent = registering ? "E-mail" : "E-mail ou usuário";
+    }
+
+    if (identifier) {
+      identifier.placeholder = registering
+        ? "seu@email.com"
+        : "Digite seu e-mail ou usuário";
+
+      identifier.autocomplete = registering ? "email" : "username";
+      identifier.type = registering ? "email" : "text";
+    }
+
+    if (passwordHint) {
+      passwordHint.hidden = !registering;
+    }
+
+    if (confirmGroup) {
+      confirmGroup.hidden = !registering;
+    }
+
+    if (elements.confirmPassword) {
+      elements.confirmPassword.required = registering;
+    }
+
+    if (submit) {
+      submit.textContent = registering ? "Criar conta" : "Entrar";
+    }
+
+    $all("[data-auth-mode-title]").forEach((element) => {
+      element.textContent = registering ? "Criar sua conta" : "Bem-vindo de volta";
+    });
+
+    $all("[data-auth-mode-description]").forEach((element) => {
+      element.textContent = registering
+        ? "Preencha os dados para começar a conversar."
+        : "Entre na sua conta para continuar.";
+    });
+
+    $all("[data-auth-mode-toggle]").forEach((button) => {
+      button.textContent = registering
+        ? "Já tenho uma conta"
+        : "Criar uma conta";
+    });
+
+    resetPasswordVisibility();
+    setMessage(elements.authMessage, "");
+    setMessage(elements.confirmPasswordMessage, "");
+
+    if (elements.password) elements.password.value = "";
+    if (elements.confirmPassword) elements.confirmPassword.value = "";
+
+    updatePasswordConfirmation();
+  }
+
+  function toggleAuthMode() {
+    setAuthMode(!registering);
+  }
+
+  function resetPasswordVisibility() {
+    if (elements.password) {
+      elements.password.type = "password";
+    }
+
+    if (elements.confirmPassword) {
+      elements.confirmPassword.type = "password";
+    }
+
+    if (elements.togglePassword) {
+      elements.togglePassword.textContent = "Mostrar";
+      elements.togglePassword.setAttribute("aria-label", "Mostrar senha");
+      elements.togglePassword.setAttribute("aria-pressed", "false");
+    }
+
+    if (elements.toggleConfirmPassword) {
+      elements.toggleConfirmPassword.textContent = "Mostrar";
+      elements.toggleConfirmPassword.setAttribute(
+        "aria-label",
+        "Mostrar confirmação de senha"
+      );
+      elements.toggleConfirmPassword.setAttribute("aria-pressed", "false");
+    }
+  }
+
+  function togglePasswordVisibility(input, button, label) {
+    if (!input || !button) return;
+
+    const showing = input.type === "password";
+
+    input.type = showing ? "text" : "password";
+    button.textContent = showing ? "Ocultar" : "Mostrar";
+    button.setAttribute("aria-pressed", String(showing));
+    button.setAttribute(
+      "aria-label",
+      `${showing ? "Ocultar" : "Mostrar"} ${label}`
+    );
+
+    input.focus();
+  }
+
+  function validatePassword(password) {
+    if (password.length < 8) {
+      return "A senha precisa ter pelo menos 8 caracteres.";
+    }
+
+    if (!/[a-z]/.test(password)) {
+      return "Inclua pelo menos uma letra minúscula.";
+    }
+
+    if (!/[A-Z]/.test(password)) {
+      return "Inclua pelo menos uma letra maiúscula.";
+    }
+
+    if (!/[0-9]/.test(password)) {
+      return "Inclua pelo menos um número.";
+    }
+
+    if (!/[^A-Za-z0-9]/.test(password)) {
+      return "Inclua pelo menos um símbolo, como ! ou @.";
+    }
+
+    if (new TextEncoder().encode(password).length > 72) {
+      return "A senha não pode ultrapassar 72 bytes.";
+    }
+
+    return "";
+  }
+
+  function updatePasswordConfirmation() {
+    const password = elements.password;
+    const confirmation = elements.confirmPassword;
+    const message = elements.confirmPasswordMessage;
+
+    if (!password || !confirmation || !message || !registering) {
+      if (confirmation) {
+        confirmation.removeAttribute("aria-invalid");
+        confirmation.classList.remove("field-error", "field-success");
+      }
+
+      setMessage(message, "");
+      return true;
+    }
+
+    const value = confirmation.value;
+
+    confirmation.classList.remove("field-error", "field-success");
+
+    if (!value) {
+      confirmation.removeAttribute("aria-invalid");
+      setMessage(message, "");
+      return false;
+    }
+
+    if (value !== password.value) {
+      confirmation.setAttribute("aria-invalid", "true");
+      confirmation.classList.add("field-error");
+      setMessage(message, "As senhas não coincidem.", "error");
+      return false;
+    }
+
+    confirmation.setAttribute("aria-invalid", "false");
+    confirmation.classList.add("field-success");
+    setMessage(message, "As senhas coincidem.", "success");
+
+    return true;
+  }
+
+  function validateRegistration() {
+    const username = elements.username?.value.trim() || "";
+    const email = elements.identifier?.value.trim() || "";
+    const password = elements.password?.value || "";
+    const confirmation = elements.confirmPassword?.value || "";
 
     if (!/^[a-zA-Z0-9_]{3,24}$/.test(username)) {
-      setMessage(
-        authMessage,
-        "O usuário deve ter de 3 a 24 caracteres: letras, números ou _.",
-        "error"
-      );
-      return;
+      return "O usuário deve ter de 3 a 24 caracteres, usando letras, números ou _.";
+    }
+
+    if (!email || !elements.identifier?.validity.valid) {
+      return "Digite um endereço de e-mail válido.";
     }
 
     const passwordError = validatePassword(password);
-    if (passwordError) {
-      setMessage(authMessage, passwordError, "error");
+
+    if (passwordError) return passwordError;
+
+    if (!confirmation) {
+      return "Confirme sua senha.";
+    }
+
+    if (password !== confirmation) {
+      updatePasswordConfirmation();
+      return "As senhas não coincidem.";
+    }
+
+    return "";
+  }
+
+  async function handleAuthSubmit(event) {
+    event.preventDefault();
+
+    if (authBusy) return;
+
+    setMessage(elements.authMessage, "");
+
+    const identifier = elements.identifier?.value.trim() || "";
+    const password = elements.password?.value || "";
+
+    if (!identifier || !password) {
+      setMessage(elements.authMessage, "Preencha todos os campos obrigatórios.", "error");
       return;
     }
-  }
 
-  authSubmit.disabled = true;
-  authSubmit.textContent = "Aguarde...";
+    if (registering) {
+      const validationError = validateRegistration();
 
-  try {
-    let result;
-
-    if (authMode === "register") {
-      result = await api("/api/register", {
-        method: "POST",
-        body: JSON.stringify({
-          username: usernameInput.value.trim(),
-          email: identifier,
-          password
-        })
-      });
-    } else {
-      result = await api("/api/login", {
-        method: "POST",
-        body: JSON.stringify({ identifier, password })
-      });
+      if (validationError) {
+        setMessage(elements.authMessage, validationError, "error");
+        return;
+      }
     }
 
-    await enterApp(result.user);
-  } catch (error) {
-    setMessage(authMessage, error.message, "error");
-  } finally {
-    authSubmit.disabled = false;
-    authSubmit.textContent = authMode === "register" ? "Criar conta" : "Entrar";
-  }
-});
+    authBusy = true;
 
-async function restoreSession() {
-  try {
-    const data = await api("/api/me");
-    if (data.authenticated && data.user) {
-      await enterApp(data.user);
-    } else {
-      showAuth();
+    if (elements.authSubmit) {
+      elements.authSubmit.disabled = true;
+      elements.authSubmit.textContent = registering
+        ? "Criando conta..."
+        : "Entrando...";
     }
-  } catch {
-    showAuth();
+
+    try {
+      let result;
+
+      if (registering) {
+        result = await request("/api/register", {
+          method: "POST",
+          body: JSON.stringify({
+            username: elements.username.value.trim(),
+            email: identifier,
+            password,
+          }),
+        });
+      } else {
+        result = await request("/api/login", {
+          method: "POST",
+          body: JSON.stringify({
+            identifier,
+            password,
+          }),
+        });
+      }
+
+      const user = result.user || result;
+
+      if (!user || !user.username) {
+        await checkSession();
+        return;
+      }
+
+      enterApp(user);
+    } catch (error) {
+      setMessage(
+        elements.authMessage,
+        error.message || "Não foi possível autenticar.",
+        "error"
+      );
+    } finally {
+      authBusy = false;
+
+      if (elements.authSubmit) {
+        elements.authSubmit.disabled = false;
+        elements.authSubmit.textContent = registering
+          ? "Criar conta"
+          : "Entrar";
+      }
+    }
   }
-}
 
-function showAuth() {
-  authView.hidden = false;
-  appView.hidden = true;
-  settingsPanel.hidden = true;
-}
+  /* ========================================
+     SESSÃO E SAÍDA
+  ======================================== */
 
-async function enterApp(user) {
-  if (!user) {
-    showAuth();
-    return;
+  async function checkSession() {
+    try {
+      const result = await request("/api/me");
+
+      if (result.authenticated && result.user) {
+        enterApp(result.user);
+      } else {
+        currentUser = null;
+        showView("auth");
+      }
+    } catch (error) {
+      currentUser = null;
+      showView("auth");
+    }
   }
 
-  currentUser = user;
-  authView.hidden = true;
-  appView.hidden = false;
+  function enterApp(user) {
+    currentUser = user;
+    currentChannel = "geral";
+    joinedChannel = null;
 
-  const name = user.username || user.name || user.email || "Usuário";
-  currentUsername.textContent = name;
-  userAvatar.textContent = name.charAt(0).toUpperCase();
+    showView("app");
 
-  await loadChannels();
-  connectSocket();
-}
-
-async function loadChannels() {
-  try {
-    const data = await api("/api/channels");
-    channels = Array.isArray(data) ? data : (data.channels || []);
-
-    if (!channels.length) channels = ["geral"];
-
-    if (!channels.includes(currentChannel)) currentChannel = channels[0];
+    setText(elements.currentUsername, user.username);
 
     renderChannels();
-    updateChannelHeader();
-  } catch (error) {
-    channelList.replaceChildren();
-    const item = document.createElement("p");
-    item.className = "muted";
-    item.textContent = error.message;
-    channelList.append(item);
-  }
-}
+    clearMessages();
 
-function renderChannels() {
-  channelList.replaceChildren();
-
-  channels.forEach((channel) => {
-    const info = channelInfo[channel] || {
-      title: channel,
-      description: "Converse neste canal.",
-      icon: "#"
-    };
-
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "channel-button";
-    button.classList.toggle("active", channel === currentChannel);
-    button.setAttribute("aria-current", channel === currentChannel ? "page" : "false");
-
-    const icon = document.createElement("span");
-    icon.className = "channel-hash";
-    icon.textContent = info.icon;
-
-    const label = document.createElement("span");
-    label.className = "channel-label";
-    label.textContent = info.title;
-
-    button.append(icon, label);
-    button.addEventListener("click", () => selectChannel(channel));
-    channelList.append(button);
-  });
-}
-
-function updateChannelHeader() {
-  const info = channelInfo[currentChannel] || {
-    title: currentChannel,
-    description: "Converse neste canal.",
-    icon: "#"
-  };
-
-  channelName.textContent = info.title;
-  channelIcon.textContent = info.icon;
-  channelDescription.textContent = info.description;
-}
-
-function selectChannel(channel) {
-  if (!channels.includes(channel) || channel === currentChannel) return;
-
-  currentChannel = channel;
-  renderChannels();
-  updateChannelHeader();
-  renderCurrentMessages();
-
-  if (socket && socket.connected) {
-    joinedChannel = null;
-    socket.emit("join channel", channel);
-  }
-}
-
-function connectSocket() {
-  if (socket) {
-    socket.disconnect();
-    socket = null;
-  }
-
-  joinedChannel = null;
-  socket = io({ withCredentials: true });
-
-  socket.on("connect", () => {
-    connectionBanner.textContent = "Conectado";
-    connectionDot.style.background = "var(--success)";
-    joinedChannel = null;
-    socket.emit("join channel", currentChannel);
-  });
-
-  socket.on("disconnect", () => {
-    connectionBanner.textContent = "Reconectando...";
-    connectionDot.style.background = "var(--danger)";
-    joinedChannel = null;
-  });
-
-  socket.on("connect_error", () => {
-    connectionBanner.textContent = "Falha na conexão";
-    connectionDot.style.background = "var(--danger)";
-  });
-
-  socket.on("channel joined", (data) => {
-    const channel = typeof data === "string" ? data : data?.channel;
-    if (channel) joinedChannel = channel;
-  });
-
-  socket.on("chat history", (history) => {
-    if (!Array.isArray(history)) return;
-
-    const channel = history[0]?.channel || joinedChannel || currentChannel;
-    messageCache.set(channel, history.slice());
-    if (channel === currentChannel) renderCurrentMessages();
-  });
-
-  socket.on("chat message", (message) => {
-    if (!message || !message.channel) return;
-
-    const existing = messageCache.get(message.channel) || [];
-    if (message.id && existing.some((item) => item.id === message.id)) return;
-
-    existing.push(message);
-    messageCache.set(message.channel, existing.slice(-500));
-
-    if (message.channel === currentChannel) {
-      const welcome = messages.querySelector(".welcome-message");
-      if (welcome) welcome.remove();
-      renderMessage(message);
-      messages.scrollTop = messages.scrollHeight;
+    if (socket) {
+      socket.connect();
     }
-  });
 
-  socket.on("error message", (data) => {
-    const message = typeof data === "string" ? data : data?.error;
-    if (message) connectionBanner.textContent = message;
-  });
-}
-
-function renderCurrentMessages() {
-  messages.replaceChildren();
-
-  const history = messageCache.get(currentChannel) || [];
-  if (!history.length) {
-    const welcome = document.createElement("div");
-    welcome.className = "welcome-message";
-
-    const icon = document.createElement("div");
-    icon.className = "welcome-icon";
-    icon.textContent = "✦";
-
-    const title = document.createElement("h2");
-    title.textContent = `Bem-vindo ao canal ${currentChannel}`;
-
-    const description = document.createElement("p");
-    description.textContent = "Envie a primeira mensagem para começar a conversa.";
-
-    welcome.append(icon, title, description);
-    messages.append(welcome);
-    return;
+    joinChannel(currentChannel);
   }
 
-  history.forEach(renderMessage);
-  messages.scrollTop = messages.scrollHeight;
-}
+  async function logout() {
+    try {
+      if (socket) {
+        socket.emit("leave channel", currentChannel);
+      }
 
-function renderMessage(message) {
-  if (!message || message.channel !== currentChannel) return;
+      await request("/api/logout", {
+        method: "POST",
+        body: JSON.stringify({}),
+      });
+    } catch (error) {
+      console.error("Erro ao sair:", error);
+    } finally {
+      currentUser = null;
+      joinedChannel = null;
+      currentChannel = "geral";
 
-  const row = document.createElement("article");
-  row.className = "message";
+      if (socket) socket.disconnect();
 
-  const username = message.username || "Usuário";
-  const avatar = document.createElement("div");
-  avatar.className = "message-avatar";
-  avatar.textContent = username.charAt(0).toUpperCase();
+      if (elements.authForm) elements.authForm.reset();
 
-  const body = document.createElement("div");
-  body.className = "message-body";
+      setAuthMode(false);
+      showView("auth");
+    }
+  }
 
-  const meta = document.createElement("div");
-  meta.className = "message-meta";
+  /* ========================================
+     CANAIS
+  ======================================== */
 
-  const name = document.createElement("strong");
-  name.textContent = username;
+  async function loadChannels() {
+    try {
+      const result = await request("/api/channels");
 
-  const time = document.createElement("time");
-  if (message.created_at) {
-    const date = new Date(message.created_at);
-    if (!Number.isNaN(date.getTime())) {
-      time.dateTime = date.toISOString();
-      time.textContent = date.toLocaleString("pt-BR", {
-        hour: "2-digit",
-        minute: "2-digit",
-        day: "2-digit",
-        month: "short"
+      if (Array.isArray(result)) {
+        channels = result;
+      } else if (Array.isArray(result.channels)) {
+        channels = result.channels;
+      }
+    } catch (error) {
+      console.warn("Usando a lista padrão de canais:", error.message);
+    }
+
+    renderChannels();
+  }
+
+  function renderChannels() {
+    if (!elements.channelList) return;
+
+    elements.channelList.replaceChildren();
+
+    channels.forEach((channel) => {
+      const button = document.createElement("button");
+
+      button.type = "button";
+      button.className = "channel-button";
+      button.dataset.channel = channel;
+
+      if (channel === currentChannel) {
+        button.classList.add("active");
+        button.setAttribute("aria-current", "true");
+      }
+
+      const icon = document.createElement("span");
+      icon.className = "channel-icon";
+      icon.textContent = "#";
+
+      const name = document.createElement("span");
+      name.textContent = channel;
+
+      button.append(icon, name);
+
+      button.addEventListener("click", () => {
+        if (channel !== currentChannel) {
+          joinChannel(channel);
+        }
+      });
+
+      elements.channelList.appendChild(button);
+    });
+  }
+
+  function joinChannel(channel) {
+    if (!channel || !channels.includes(channel)) return;
+
+    currentChannel = channel;
+    joinedChannel = null;
+
+    setText(elements.currentChannel, `#${channel}`);
+
+    renderChannels();
+    clearMessages();
+
+    if (socket && socket.connected) {
+      socket.emit("join channel", channel);
+    } else if (!socket) {
+      addSystemMessage("A conexão com o servidor de chat não está disponível.");
+    }
+  }
+
+  /* ========================================
+     MENSAGENS
+  ======================================== */
+
+  function clearMessages() {
+    if (elements.messages) {
+      elements.messages.replaceChildren();
+    }
+  }
+
+  function addSystemMessage(text) {
+    if (!elements.messages) return;
+
+    const item = document.createElement("div");
+    item.className = "message system";
+    item.textContent = text;
+
+    elements.messages.appendChild(item);
+    scrollMessagesToBottom();
+  }
+
+  function scrollMessagesToBottom() {
+    if (!elements.messages) return;
+
+    elements.messages.scrollTop = elements.messages.scrollHeight;
+  }
+
+  function renderMessage(message) {
+    if (!elements.messages || !message) return;
+
+    const rowChannel = message.channel || joinedChannel || currentChannel;
+
+    if (rowChannel !== currentChannel) return;
+
+    const wrapper = document.createElement("article");
+    wrapper.className = "message";
+
+    if (currentUser && message.username === currentUser.username) {
+      wrapper.classList.add("own");
+    }
+
+    const avatar = document.createElement("div");
+    avatar.className = "message-avatar";
+    avatar.textContent = escapeText(message.username).charAt(0).toUpperCase() || "?";
+    avatar.setAttribute("aria-hidden", "true");
+
+    const content = document.createElement("div");
+    content.className = "message-content";
+
+    const meta = document.createElement("div");
+    meta.className = "message-meta";
+
+    const username = document.createElement("span");
+    username.className = "message-username";
+    username.textContent = escapeText(message.username || "Usuário");
+
+    const time = document.createElement("time");
+    time.className = "message-time";
+    time.textContent = formatTime(message.created_at);
+
+    if (message.created_at) {
+      time.dateTime = new Date(message.created_at).toISOString();
+    }
+
+    const text = document.createElement("p");
+    text.className = "message-text";
+    text.textContent = escapeText(message.message);
+
+    meta.append(username, time);
+    content.append(meta, text);
+    wrapper.append(avatar, content);
+
+    elements.messages.appendChild(wrapper);
+    scrollMessagesToBottom();
+  }
+
+  async function handleSendMessage(event) {
+    event.preventDefault();
+
+    if (!currentUser || !socket || !socket.connected) {
+      addSystemMessage("Você não está conectado ao servidor.");
+      return;
+    }
+
+    if (sendingMessage) return;
+
+    const message = elements.messageInput?.value.trim() || "";
+
+    if (!message) return;
+
+    sendingMessage = true;
+
+    if (elements.sendButton) {
+      elements.sendButton.disabled = true;
+    }
+
+    socket.emit(
+      "send message",
+      {
+        channel: currentChannel,
+        message,
+      },
+      (response) => {
+        sendingMessage = false;
+
+        if (elements.sendButton) {
+          elements.sendButton.disabled = false;
+        }
+
+        if (response && response.error) {
+          addSystemMessage(response.error);
+          return;
+        }
+
+        if (elements.messageInput) {
+          elements.messageInput.value = "";
+          elements.messageInput.focus();
+        }
+      }
+    );
+
+    // Evita deixar o botão travado caso o servidor não envie callback.
+    window.setTimeout(() => {
+      sendingMessage = false;
+
+      if (elements.sendButton) {
+        elements.sendButton.disabled = false;
+      }
+    }, 5000);
+  }
+
+  /* ========================================
+     SOCKET.IO
+  ======================================== */
+
+  function setupSocket() {
+    if (!socket) {
+      console.warn("Socket.IO não foi carregado.");
+      return;
+    }
+
+    socket.on("connect", () => {
+      if (currentUser) {
+        joinedChannel = null;
+        socket.emit("join channel", currentChannel);
+      }
+    });
+
+    socket.on("disconnect", () => {
+      joinedChannel = null;
+      updateConnectionStatus(false);
+    });
+
+    socket.on("connect_error", (error) => {
+      console.error("Erro de conexão:", error.message);
+      updateConnectionStatus(false);
+    });
+
+    socket.on("channel joined", (channel) => {
+      joinedChannel = typeof channel === "string"
+        ? channel
+        : channel?.channel || currentChannel;
+
+      if (joinedChannel === currentChannel) {
+        setText(elements.currentChannel, `#${currentChannel}`);
+        updateConnectionStatus(true);
+      }
+    });
+
+    socket.on("chat history", (history) => {
+      if (!Array.isArray(history)) return;
+
+      clearMessages();
+
+      history.forEach((message) => {
+        renderMessage(message);
+      });
+    });
+
+    socket.on("chat message", (message) => {
+      if (!message) return;
+
+      if ((message.channel || currentChannel) !== currentChannel) {
+        return;
+      }
+
+      renderMessage(message);
+    });
+  }
+
+  function updateConnectionStatus(connected) {
+    const status = $("#connectionStatus") || $(".connection-status");
+
+    if (!status) return;
+
+    status.classList.toggle("offline", !connected);
+    status.classList.toggle("disconnected", !connected);
+
+    status.textContent = connected ? "Conectado" : "Desconectado";
+  }
+
+  /* ========================================
+     CONFIGURAÇÕES
+  ======================================== */
+
+  function toggleSettings() {
+    settingsOpen = !settingsOpen;
+
+    if (elements.settingsPanel) {
+      elements.settingsPanel.hidden = !settingsOpen;
+    }
+
+    if (elements.settingsContent) {
+      elements.settingsContent.hidden = !settingsOpen;
+    }
+
+    if (elements.settingsButton) {
+      elements.settingsButton.setAttribute(
+        "aria-expanded",
+        String(settingsOpen)
+      );
+    }
+  }
+
+  function setupSettings() {
+    const savedTheme = localStorage.getItem("nexo-theme");
+
+    if (savedTheme === "light") {
+      document.body.classList.add("light-theme");
+    }
+
+    const themeToggle = $("#themeToggle");
+
+    if (themeToggle) {
+      themeToggle.checked = savedTheme === "light";
+
+      themeToggle.addEventListener("change", () => {
+        const light = themeToggle.checked;
+
+        document.body.classList.toggle("light-theme", light);
+        localStorage.setItem("nexo-theme", light ? "light" : "dark");
+      });
+    }
+
+    const soundToggle = $("#soundToggle");
+
+    if (soundToggle) {
+      soundToggle.checked = localStorage.getItem("nexo-sound") !== "off";
+
+      soundToggle.addEventListener("change", () => {
+        localStorage.setItem(
+          "nexo-sound",
+          soundToggle.checked ? "on" : "off"
+        );
       });
     }
   }
 
-  const text = document.createElement("div");
-  text.className = "message-text";
-  text.textContent = message.message || "";
+  /* ========================================
+     EVENTOS DA INTERFACE
+  ======================================== */
 
-  meta.append(name, time);
-  body.append(meta, text);
-  row.append(avatar, body);
-  messages.append(row);
-}
-
-messageForm.addEventListener("submit", (event) => {
-  event.preventDefault();
-
-  const message = messageInput.value.trim();
-  if (!message || !socket || !socket.connected || isSending) return;
-
-  isSending = true;
-  socket.emit("send message", {
-    channel: currentChannel,
-    message
-  }, (response) => {
-    isSending = false;
-    if (response?.error) {
-      connectionBanner.textContent = response.error;
+  function setupEvents() {
+    if (elements.authForm) {
+      elements.authForm.addEventListener("submit", handleAuthSubmit);
     }
-  });
 
-  messageInput.value = "";
-  messageInput.focus();
-  isSending = false;
-});
+    $all("[data-auth-mode-toggle]").forEach((button) => {
+      button.addEventListener("click", toggleAuthMode);
+    });
 
-$("#emojiButton").addEventListener("click", () => {
-  const emojis = ["😀", "😂", "❤️", "👍", "🔥", "🎮", "✨", "👋"];
-  const emoji = emojis[Math.floor(Math.random() * emojis.length)];
-  const start = messageInput.selectionStart ?? messageInput.value.length;
-  const end = messageInput.selectionEnd ?? messageInput.value.length;
-  messageInput.setRangeText(emoji, start, end, "end");
-  messageInput.focus();
-});
+    // Compatibilidade com botões de alternância usados em versões anteriores.
+    [
+      "#switchAuthMode",
+      "#toggleAuthMode",
+      "#authModeToggle",
+      "#authSwitchButton",
+    ].forEach((selector) => {
+      const button = $(selector);
 
-$("#logoutButton").addEventListener("click", async () => {
-  try {
-    await api("/api/logout", { method: "POST", body: JSON.stringify({}) });
-  } catch {
-    // Mesmo se a resposta falhar, volta para a tela de login.
+      if (button && !button.hasAttribute("data-auth-mode-toggle")) {
+        button.addEventListener("click", toggleAuthMode);
+      }
+    });
+
+    if (elements.togglePassword) {
+      elements.togglePassword.addEventListener("click", () => {
+        togglePasswordVisibility(
+          elements.password,
+          elements.togglePassword,
+          "senha"
+        );
+      });
+    }
+
+    if (elements.toggleConfirmPassword) {
+      elements.toggleConfirmPassword.addEventListener("click", () => {
+        togglePasswordVisibility(
+          elements.confirmPassword,
+          elements.toggleConfirmPassword,
+          "confirmação de senha"
+        );
+      });
+    }
+
+    if (elements.password) {
+      elements.password.addEventListener("input", updatePasswordConfirmation);
+    }
+
+    if (elements.confirmPassword) {
+      elements.confirmPassword.addEventListener(
+        "input",
+        updatePasswordConfirmation
+      );
+    }
+
+    if (elements.logoutButton) {
+      elements.logoutButton.addEventListener("click", logout);
+    }
+
+    if (elements.settingsButton) {
+      elements.settingsButton.addEventListener("click", toggleSettings);
+    }
+
+    if (elements.messageForm) {
+      elements.messageForm.addEventListener("submit", handleSendMessage);
+    }
+
+    if (elements.messageInput) {
+      elements.messageInput.addEventListener("keydown", (event) => {
+        if (event.key === "Enter" && !event.shiftKey) {
+          event.preventDefault();
+
+          if (elements.messageForm?.requestSubmit) {
+            elements.messageForm.requestSubmit();
+          }
+        }
+      });
+    }
+
+    const closeSettings = $("#closeSettings");
+
+    if (closeSettings) {
+      closeSettings.addEventListener("click", () => {
+        settingsOpen = true;
+        toggleSettings();
+      });
+    }
   }
 
-  if (socket) socket.disconnect();
-  socket = null;
-  currentUser = null;
-  messageCache.clear();
-  showAuth();
-  authForm.reset();
-  setAuthMode("login");
-});
+  /* ========================================
+     INICIALIZAÇÃO
+  ======================================== */
 
-$("#settingsButton").addEventListener("click", () => {
-  settingsPanel.hidden = !settingsPanel.hidden;
-});
+  async function init() {
+    setAuthMode(false);
+    setupEvents();
+    setupSettings();
+    setupSocket();
 
-$("#closeSettings").addEventListener("click", () => {
-  settingsPanel.hidden = true;
-});
-
-$("#closeRightPanel").addEventListener("click", () => {
-  settingsPanel.hidden = true;
-});
-
-function applySettings(settings) {
-  const theme = settings.theme || "dark";
-  const accent = settings.accent || "#8b5cf6";
-  const fontSize = settings.fontSize || "medium";
-  const font = settings.font || "inter";
-
-  document.body.classList.toggle("theme-light", theme === "light");
-
-  ["font-small", "font-medium", "font-large",
-    "font-inter", "font-arial", "font-georgia", "font-mono"]
-    .forEach((className) => document.body.classList.remove(className));
-
-  document.body.classList.add(`font-${fontSize}`, `font-${font}`);
-  document.documentElement.style.setProperty("--accent", accent);
-
-  const darker = accent;
-  document.documentElement.style.setProperty("--accent-hover", darker);
-
-  $("#themeSelect").value = theme;
-  $("#accentColor").value = accent;
-  $("#fontSize").value = fontSize;
-  $("#fontSelect").value = font;
-}
-
-function readSettings() {
-  return {
-    theme: $("#themeSelect").value,
-    accent: $("#accentColor").value,
-    fontSize: $("#fontSize").value,
-    font: $("#fontSelect").value
-  };
-}
-
-function loadSettings() {
-  try {
-    const saved = JSON.parse(localStorage.getItem("nexo-settings") || "{}");
-    applySettings(saved);
-  } catch {
-    applySettings({});
+    await loadChannels();
+    await checkSession();
   }
-}
 
-$("#saveSettings").addEventListener("click", () => {
-  const settings = readSettings();
-
-  try {
-    localStorage.setItem("nexo-settings", JSON.stringify(settings));
-    applySettings(settings);
-    setMessage(settingsMessage, "Configurações salvas!", "success");
-  } catch {
-    setMessage(settingsMessage, "Não foi possível salvar as configurações.", "error");
-  }
-});
-
-$("#themeShortcut").addEventListener("click", () => {
-  const settings = readSettings();
-  settings.theme = settings.theme === "dark" ? "light" : "dark";
-  $("#themeSelect").value = settings.theme;
-  applySettings(settings);
-
-  try {
-    localStorage.setItem("nexo-settings", JSON.stringify(settings));
-  } catch {
-    // A alteração continua aplicada até a página ser recarregada.
-  }
-});
-
-loadSettings();
-restoreSession();
+  document.addEventListener("DOMContentLoaded", init);
+})();
