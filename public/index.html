@@ -11,61 +11,185 @@
   <script src="/app.js" defer></script>
 </head>
 <body>
+  <!-- TELA DE LOGIN E CADASTRO -->
   <div id="authView" class="auth-view">
     <div class="auth-card">
+
       <a class="brand auth-brand" href="#">
         <span class="brand-mark">N</span>
         <span>NEXO</span>
       </a>
 
       <p class="eyebrow">SUA COMUNIDADE, EM UM SÓ LUGAR</p>
+
       <h1 id="authTitle">Bem-vindo de volta</h1>
-      <p id="authDescription" class="muted">Entre para continuar suas conversas.</p>
+
+      <p id="authDescription" class="muted">
+        Entre para continuar suas conversas.
+      </p>
 
       <div class="auth-tabs">
-        <button type="button" id="loginTab" class="auth-tab active">Entrar</button>
-        <button type="button" id="registerTab" class="auth-tab">Criar conta</button>
+        <button
+          type="button"
+          id="loginTab"
+          class="auth-tab active"
+        >
+          Entrar
+        </button>
+
+        <button
+          type="button"
+          id="registerTab"
+          class="auth-tab"
+        >
+          Criar conta
+        </button>
       </div>
 
       <form id="authForm">
-        <label for="username" id="usernameLabel" hidden>Nome de usuário</label>
-        <input id="username" name="username" type="text"
-          placeholder="Seu nome de usuário" autocomplete="username"
-          minlength="3" maxlength="24" hidden>
 
-        <label for="identifier">Usuário ou e-mail</label>
-        <input id="identifier" name="identifier" type="text"
+        <!-- NOME DE USUÁRIO: APENAS NO CADASTRO -->
+        <div id="usernameGroup" hidden>
+          <label for="username" id="usernameLabel">
+            Nome de usuário
+          </label>
+
+          <input
+            id="username"
+            name="username"
+            type="text"
+            placeholder="Escolha um nome de usuário"
+            autocomplete="username"
+            minlength="3"
+            maxlength="24"
+          >
+        </div>
+
+        <!-- USUÁRIO OU E-MAIL -->
+        <label for="identifier" id="identifierLabel">
+          Usuário ou e-mail
+        </label>
+
+        <input
+          id="identifier"
+          name="identifier"
+          type="text"
           placeholder="Digite seu usuário ou e-mail"
-          autocomplete="username" required>
+          autocomplete="username"
+          required
+        >
 
+        <!-- SENHA -->
         <label for="password">Senha</label>
-        <input id="password" name="password" type="password"
-          placeholder="Digite sua senha" autocomplete="current-password"
-          required>
+
+        <div class="password-wrapper">
+          <input
+            id="password"
+            name="password"
+            type="password"
+            placeholder="Digite sua senha"
+            autocomplete="current-password"
+            required
+          >
+
+          <button
+            id="togglePassword"
+            class="password-toggle"
+            type="button"
+            aria-label="Mostrar senha"
+            aria-pressed="false"
+          >
+            Mostrar
+          </button>
+        </div>
 
         <p id="passwordHint" class="field-hint" hidden>
-          Use pelo menos 8 caracteres, com maiúscula, minúscula, número e símbolo.
+          Use pelo menos 8 caracteres, com letra maiúscula,
+          minúscula, número e símbolo.
         </p>
 
-        <button id="authSubmit" class="primary-button full-button" type="submit">
+        <!-- CONFIRMAR SENHA: APENAS NO CADASTRO -->
+        <div id="confirmPasswordGroup" hidden>
+
+          <label for="confirmPassword">
+            Confirmar senha
+          </label>
+
+          <div class="password-wrapper">
+            <input
+              id="confirmPassword"
+              name="confirmPassword"
+              type="password"
+              placeholder="Digite a senha novamente"
+              autocomplete="new-password"
+            >
+
+            <button
+              id="toggleConfirmPassword"
+              class="password-toggle"
+              type="button"
+              aria-label="Mostrar confirmação da senha"
+              aria-pressed="false"
+            >
+              Mostrar
+            </button>
+          </div>
+
+          <p
+            id="confirmPasswordMessage"
+            class="form-message"
+            role="status"
+            aria-live="polite"
+          ></p>
+
+        </div>
+
+        <!-- BOTÃO DE ENTRAR OU CADASTRAR -->
+        <button
+          id="authSubmit"
+          class="primary-button full-button"
+          type="submit"
+        >
           Entrar
         </button>
-        <p id="authMessage" class="form-message" role="status"></p>
+
+        <p
+          id="authMessage"
+          class="form-message"
+          role="status"
+          aria-live="polite"
+        ></p>
+
       </form>
 
-      <p class="auth-footer">Um espaço para conversar, compartilhar e descobrir.</p>
+      <p class="auth-footer">
+        Um espaço para conversar, compartilhar e descobrir.
+      </p>
+
     </div>
   </div>
 
+  <!-- APLICAÇÃO PRINCIPAL -->
   <div id="appView" class="app-view" hidden>
+
+    <!-- BARRA LATERAL -->
     <aside class="sidebar">
+
       <div class="sidebar-top">
         <a class="brand" href="#">
           <span class="brand-mark">N</span>
           <span>NEXO</span>
         </a>
-        <button id="themeShortcut" class="icon-button" type="button"
-          title="Alternar tema" aria-label="Alternar tema">◐</button>
+
+        <button
+          id="themeShortcut"
+          class="icon-button"
+          type="button"
+          title="Alternar tema"
+          aria-label="Alternar tema"
+        >
+          ◐
+        </button>
       </div>
 
       <div class="workspace-label">SEU ESPAÇO</div>
@@ -75,43 +199,79 @@
         <span class="tiny-badge">NEXO</span>
       </div>
 
-      <nav id="channelList" class="channel-list" aria-label="Canais">
+      <nav
+        id="channelList"
+        class="channel-list"
+        aria-label="Canais"
+      >
         <p class="muted">Carregando canais...</p>
       </nav>
 
       <div class="sidebar-bottom">
+
         <div class="user-card">
           <div id="userAvatar" class="avatar">N</div>
+
           <div class="user-info">
             <strong id="currentUsername">Usuário</strong>
-            <span><span class="online-dot"></span> Online</span>
+            <span>
+              <span class="online-dot"></span>
+              Online
+            </span>
           </div>
-          <button id="settingsButton" class="icon-button" type="button"
-            title="Configurações" aria-label="Configurações">⚙</button>
+
+          <button
+            id="settingsButton"
+            class="icon-button"
+            type="button"
+            title="Configurações"
+            aria-label="Configurações"
+          >
+            ⚙
+          </button>
         </div>
-        <button id="logoutButton" class="logout-button" type="button">
+
+        <button
+          id="logoutButton"
+          class="logout-button"
+          type="button"
+        >
           <span>↪</span> Sair da conta
         </button>
+
       </div>
     </aside>
 
+    <!-- ÁREA DO CHAT -->
     <main class="chat-area">
+
       <header class="chat-header">
+
         <div class="channel-heading">
           <div id="channelIcon" class="channel-heading-icon">#</div>
+
           <div>
             <h2 id="channelName">geral</h2>
-            <p id="channelDescription">Converse com a comunidade.</p>
+            <p id="channelDescription">
+              Converse com a comunidade.
+            </p>
           </div>
         </div>
+
         <div class="header-status">
           <span id="connectionDot" class="online-dot"></span>
           <span id="connectionBanner">Conectando...</span>
         </div>
+
       </header>
 
-      <section id="messages" class="messages" aria-live="polite"
-        aria-label="Mensagens do canal">
+      <!-- MENSAGENS -->
+      <section
+        id="messages"
+        class="messages"
+        aria-live="polite"
+        aria-label="Mensagens do canal"
+      >
         <div class="welcome-message">
           <div class="welcome-icon">✦</div>
           <h2>Bem-vindo ao NEXO</h2>
@@ -119,32 +279,73 @@
         </div>
       </section>
 
+      <!-- CAMPO DE ENVIO -->
       <div class="composer-wrap">
+
         <form id="messageForm" class="message-form">
-          <button id="emojiButton" class="icon-button emoji-button"
-            type="button" title="Inserir emoji" aria-label="Inserir emoji">☺</button>
-          <input id="messageInput" name="message" type="text"
-            maxlength="2000" placeholder="Escreva uma mensagem..."
-            autocomplete="off" aria-label="Sua mensagem" required>
+
+          <button
+            id="emojiButton"
+            class="icon-button emoji-button"
+            type="button"
+            title="Inserir emoji"
+            aria-label="Inserir emoji"
+          >
+            ☺
+          </button>
+
+          <input
+            id="messageInput"
+            name="message"
+            type="text"
+            maxlength="2000"
+            placeholder="Escreva uma mensagem..."
+            autocomplete="off"
+            aria-label="Sua mensagem"
+            required
+          >
+
           <span class="composer-shortcut">Enter ↵</span>
-          <button class="send-button" type="submit"
-            aria-label="Enviar mensagem" title="Enviar mensagem">➤</button>
+
+          <button
+            class="send-button"
+            type="submit"
+            aria-label="Enviar mensagem"
+            title="Enviar mensagem"
+          >
+            ➤
+          </button>
+
         </form>
-        <p class="composer-hint">Converse com respeito. Você está no NEXO.</p>
+
+        <p class="composer-hint">
+          Converse com respeito. Você está no NEXO.
+        </p>
+
       </div>
     </main>
 
+    <!-- CONFIGURAÇÕES -->
     <aside id="settingsPanel" class="settings-panel" hidden>
+
       <div class="settings-header">
         <div>
           <p class="eyebrow">PERSONALIZAÇÃO</p>
           <h2>Configurações</h2>
         </div>
-        <button id="closeSettings" class="icon-button" type="button"
-          aria-label="Fechar configurações">✕</button>
+
+        <button
+          id="closeSettings"
+          class="icon-button"
+          type="button"
+          aria-label="Fechar configurações"
+        >
+          ✕
+        </button>
       </div>
 
       <div class="settings-content">
+
         <section class="settings-section">
           <h3>Aparência</h3>
 
@@ -155,8 +356,13 @@
           </select>
 
           <label for="accentColor">Cor de destaque</label>
+
           <div class="color-control">
-            <input id="accentColor" type="color" value="#8b5cf6">
+            <input
+              id="accentColor"
+              type="color"
+              value="#8b5cf6"
+            >
             <span>Escolha sua cor favorita</span>
           </div>
 
@@ -176,14 +382,30 @@
           </select>
         </section>
 
-        <button id="saveSettings" class="primary-button full-button" type="button">
+        <button
+          id="saveSettings"
+          class="primary-button full-button"
+          type="button"
+        >
           Salvar configurações
         </button>
-        <p id="settingsMessage" class="form-message" role="status"></p>
+
+        <p
+          id="settingsMessage"
+          class="form-message"
+          role="status"
+        ></p>
+
       </div>
 
-      <button id="closeRightPanel" class="secondary-button full-button"
-        type="button">Fechar painel</button>
+      <button
+        id="closeRightPanel"
+        class="secondary-button full-button"
+        type="button"
+      >
+        Fechar painel
+      </button>
+
     </aside>
   </div>
 </body>
