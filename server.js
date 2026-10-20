@@ -24,9 +24,7 @@ const DATABASE_URL = process.env.DATABASE_URL;
 const SESSION_SECRET = process.env.SESSION_SECRET;
 
 if (!DATABASE_URL || !SESSION_SECRET) {
-  console.error(
-    "Configure DATABASE_URL e SESSION_SECRET nas variáveis de ambiente."
-  );
+  console.error("Configure DATABASE_URL e SESSION_SECRET nas variáveis de ambiente.");
   process.exit(1);
 }
 
@@ -227,3 +225,39 @@ app.post("/api/register", sameOrigin, async (req, res) => {
 app.post("/api/login", sameOrigin, async (req, res) => {
   try {
     const identifier = String(req.body.identifier || "").trim();
+    const password = req.body.password;
+
+    if (!identifier || typeof password !== "string") {
+      return res.status(400).json({
+        error: "Informe usuário/e-mail e senha."
+      });
+    }
+
+    const result = await pool.query(
+      `SELECT id, username, email, password_hash
+       FROM users
+       WHERE LOWER(username) = LOWER($1)
+          OR LOWER(email) = LOWER($1)
+       LIMIT 1`,
+      [identifier]
+    );
+
+    const record = result.rows[0];
+
+    if (!record || !(await bcrypt.compare(password, record.password_hash))) {
+      return res.status(401).json({
+        error: "Usuário ou senha incorretos."
+      });
+    }
+
+    const user = publicUser(record);
+    req.session.user = user;
+
+    await saveSession(req);
+
+    res.json({ user });
+  } catch (error) {
+    console.error("Erro no login:", error);
+    res.status(500).json({ error: "Não foi possível entrar na sua conta." });
+  }
+});
