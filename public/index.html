@@ -720,10 +720,13 @@
         <button id="declineCallBtn" type="button">Recusar</button>
       </div>
 
-      <div id="activeCallActions" hidden>
-        <button id="muteCallBtn" type="button">Silenciar microfone</button>
-        <button id="endCallBtn" type="button">Encerrar chamada</button>
-      </div>
+<div id="activeCallActions" hidden>
+  <button id="muteCallBtn" type="button">Silenciar microfone</button>
+  <button id="switchCameraBtn" type="button" hidden>
+    🔄 Virar câmera
+  </button>
+  <button id="endCallBtn" type="button">Encerrar chamada</button>
+</div>
     </div>
   </div>
 
@@ -1260,15 +1263,106 @@ const callTitle = $("#callTitle");
 const callStatus = $("#callStatus");
 const remoteVideo = $("#remoteVideo");
 const localVideo = $("#localVideo");
-const incomingCallActions = $("#incomingCallActions");
-const activeCallActions = $("#activeCallActions");
+const switchCameraBtn = $("#switchCameraBtn");
 const callUserSelect = $("#callUserSelect");
 const voiceCallBtn = $("#voiceCallBtn");
 const videoCallBtn = $("#videoCallBtn");
+const incomingCallActions = $("#incomingCallActions");
+const activeCallActions = $("#activeCallActions");
 const acceptCallBtn = $("#acceptCallBtn");
 const declineCallBtn = $("#declineCallBtn");
 const muteCallBtn = $("#muteCallBtn");
 const endCallBtn = $("#endCallBtn");
+    
+let ringtoneTimer = null;
+let ringtoneAudioContext = null;
+let currentCameraFacing = "user";
+let ringtoneType = "incoming";
+
+function prepareCallAudio() {
+  if (!ringtoneAudioContext) {
+    const AudioContextClass =
+      window.AudioContext || window.webkitAudioContext;
+
+    if (!AudioContextClass) return;
+
+    ringtoneAudioContext = new AudioContextClass();
+  }
+
+  if (ringtoneAudioContext.state === "suspended") {
+    ringtoneAudioContext.resume().catch(() => {});
+  }
+}
+
+document.addEventListener("pointerdown", prepareCallAudio, {
+  once: true
+});
+
+function playCallTone(frequency, duration = 350) {
+  if (!ringtoneAudioContext ||
+      ringtoneAudioContext.state !== "running") {
+    return;
+  }
+
+  const ctx = ringtoneAudioContext;
+  const oscillator = ctx.createOscillator();
+  const gain = ctx.createGain();
+  const now = ctx.currentTime;
+
+  oscillator.type = "sine";
+  oscillator.frequency.value = frequency;
+
+  gain.gain.setValueAtTime(0.001, now);
+  gain.gain.linearRampToValueAtTime(0.12, now + 0.025);
+  gain.gain.setValueAtTime(0.12, now + duration / 1000 - 0.05);
+  gain.gain.linearRampToValueAtTime(
+    0.001,
+    now + duration / 1000
+  );
+
+  oscillator.connect(gain);
+  gain.connect(ctx.destination);
+
+  oscillator.start(now);
+  oscillator.stop(now + duration / 1000);
+}
+
+function stopRingtone() {
+  if (ringtoneTimer !== null) {
+    clearInterval(ringtoneTimer);
+    ringtoneTimer = null;
+  }
+}
+
+function startRingtone(type = "incoming") {
+  stopRingtone();
+  prepareCallAudio();
+
+  ringtoneType = type;
+
+  const ring = () => {
+    if (!ringtoneAudioContext ||
+        ringtoneAudioContext.state !== "running") {
+      return;
+    }
+
+    if (ringtoneType === "outgoing") {
+      playCallTone(440, 650);
+    } else {
+      playCallTone(660, 220);
+
+      setTimeout(() => {
+        if (ringtoneTimer !== null &&
+            ringtoneType === "incoming") {
+          playCallTone(880, 220);
+        }
+      }, 280);
+    }
+  };
+
+  ring();
+  ringtoneTimer = setInterval(ring, 1500);
+}
 
 let isCaller = false;
 let pendingIceCandidates = [];
@@ -1342,7 +1436,93 @@ async function getCallMedia(mode) {
       : false
   });
 }
+async function switchCamera() {
+  if (!localStream || !peerConnection || callMode !== "video") {
+    return;
+  }
 
+  switchCameraBtn.disabled = true;
+  let newStream = null;
+
+  try {
+    const currentTrack = localStream.getVideoTracks()[0];
+    const currentSettings = currentTrack?.getSettings();
+    const currentFacing =
+      currentSettings?.facingMode || currentCameraFacing;
+
+    const nextFacing =
+      currentFacing === "environment" ? "user" : "environment";
+
+    try {
+      newStream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          facingMode: { exact: nextFacing },
+          width: { ideal: 1280 },
+          height: { ideal: 720 }
+        },
+        audio: false
+      });
+    } catch {
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const cameras = devices.filter(
+        device => device.kind === "videoinput"
+      );
+
+      const otherCamera = cameras.find(
+        camera => camera.deviceId !== currentSettings?.deviceId
+      );
+
+      if (!otherCamera) {
+        throw new Error("Não foi encontrada outra câmera disponível.");
+      }
+
+      newStream = await navigator.mediaDevices.getUserMedia({
+        video: { deviceId: { exact: otherCamera.deviceId } },
+        audio: false
+      });
+    }
+
+    const newTrack = newStream.getVideoTracks()[0];
+    const sender = peerConnection
+      .getSenders()
+      .find(item => item.track?.kind === "video");
+
+    if (!newTrack || !sender) {
+      throw new Error("Não foi possível trocar a câmera.");
+    }
+
+    await sender.replaceTrack(newTrack);
+
+    if (currentTrack) {
+      localStream.removeTrack(currentTrack);
+      currentTrack.stop();
+    }
+
+    localStream.addTrack(newTrack);
+    localVideo.srcObject = localStream;
+
+    currentCameraFacing =
+      newTrack.getSettings().facingMode || nextFacing;
+
+    callStatus.textContent = "Câmera alterada.";
+  } catch (error) {
+    console.error("Erro ao trocar a câmera:", error);
+    showNotice(
+      chatNotice,
+      error.message || "Não foi possível trocar a câmera."
+    );
+  } finally {
+    if (newStream) {
+      newStream.getTracks().forEach(track => {
+        if (!localStream?.getTracks().includes(track)) {
+          track.stop();
+        }
+      });
+    }
+
+    switchCameraBtn.disabled = false;
+  }
+}
 function createPeerConnection() {
   if (!localStream) {
     throw new Error("O microfone ou a câmera ainda não foram inicializados.");
@@ -1468,14 +1648,16 @@ async function startCall(mode) {
   callStatus.textContent = "Solicitando acesso ao microfone e à câmera...";
   incomingCallActions.hidden = true;
   activeCallActions.hidden = true;
-  showCallWindow();
-  updateCallButtons();
+ showCallWindow();
+ startRingtone("outgoing");
+ updateCallButtons();
 
   try {
     localStream = await getCallMedia(mode);
     localVideo.srcObject = localStream;
     localVideo.hidden = mode !== "video";
     remoteVideo.hidden = mode !== "video";
+    switchCameraBtn.hidden = mode !== "video";
 
     createPeerConnection();
 
@@ -1632,8 +1814,9 @@ function handleIncomingCallRequest(data) {
   incomingCallActions.hidden = false;
   activeCallActions.hidden = true;
 
-  showCallWindow();
-  updateCallButtons();
+ showCallWindow();
+startRingtone("incoming");
+updateCallButtons();
 }
 
 function finishCall(notifyPeer = true, message = "") {
@@ -1652,8 +1835,11 @@ function finishCall(notifyPeer = true, message = "") {
     showNotice(chatNotice, message);
   }
 }
+switchCameraBtn.addEventListener("click", () => {
+  switchCamera();
+});
 
-// Botões de chamada
+ // Botões de chamada
 voiceCallBtn.addEventListener("click", () => {
   startCall("audio");
 });
