@@ -59,7 +59,7 @@
         </div>
 
         <div class="form-field">
-          <label for="identifier">E-mail</label>
+          <label for="identifier">E-mail ou usuário</label>
           <input
             id="identifier"
             name="identifier"
@@ -77,14 +77,14 @@
             id="password"
             name="password"
             type="password"
-            minlength="10"
+            minlength="6"
             maxlength="72"
             placeholder="Digite sua senha"
             autocomplete="current-password"
             required
           >
-          <small id="passwordHint" class="password-hint">
-            No cadastro, use pelo menos 10 caracteres.
+          <small id="passwordHint">
+            No cadastro, use pelo menos 6 caracteres.
           </small>
         </div>
 
@@ -119,6 +119,7 @@
             <span>Conectado</span>
           </div>
         </div>
+
         <button id="settingsButton" class="secondary-button" type="button">
           Personalizar
         </button>
@@ -131,24 +132,31 @@
     <section class="chat-panel">
       <header class="chat-header">
         <div>
-          <h1><span id="channelIcon">#</span> <span id="channelName">geral</span></h1>
+          <h1>
+            <span id="channelIcon">#</span>
+            <span id="channelName">geral</span>
+          </h1>
           <p id="channelDescription">
             Um espaço para conversar e compartilhar ideias.
           </p>
         </div>
+
         <button id="themeShortcut" class="secondary-button" type="button">
           Aparência
         </button>
       </header>
 
       <section id="messages" class="messages" aria-live="polite"></section>
-
       <p id="chatError" class="error-message" role="alert"></p>
 
       <form id="messageForm" class="message-form">
-        <button id="emojiButton" class="emoji-button" type="button" aria-label="Adicionar emoji">
-          😊
-        </button>
+        <button
+          id="emojiButton"
+          class="emoji-button"
+          type="button"
+          aria-label="Adicionar emoji"
+        >😊</button>
+
         <input
           id="messageInput"
           type="text"
@@ -157,6 +165,7 @@
           autocomplete="off"
           required
         >
+
         <button class="primary-button send-button" type="submit">
           Enviar
         </button>
@@ -205,6 +214,7 @@
       </button>
 
       <p id="settingsMessage" role="status"></p>
+
       <button id="closeRightPanel" class="secondary-button" type="button">
         Fechar painel
       </button>
