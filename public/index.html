@@ -1328,7 +1328,14 @@ await enterChat();
 
         socket.on("connect_error", (error) => {
   setConnection(false, "Sem conexão");
+
   console.error("Erro de conexão Socket.IO:", error);
+  console.error("Motivo detalhado:", error.message);
+
+  showNotice(
+    chatNotice,
+    `Falha na conexão: ${error.message || "erro desconhecido"}`
+  );
 });
         socket.on("chat history", (history) => {
           const list = Array.isArray(history)
