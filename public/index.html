@@ -474,7 +474,51 @@
       .send-btn { min-width: 60px; padding: 13px 10px; }
       .auth-card { padding: 23px; }
     }
-  </style>
+  
+  .call-controls {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-left: auto;
+    flex-wrap: wrap;
+  }
+
+  .call-controls select,
+  .call-controls button {
+    padding: 10px 12px;
+    border: 1px solid #334155;
+    border-radius: 8px;
+    background: #172033;
+    color: #ffffff;
+    font-size: 13px;
+  }
+
+  .call-controls button {
+    cursor: pointer;
+  }
+
+  .call-controls button:hover {
+    background: #2563eb;
+  }
+
+  @media (max-width: 700px) {
+    .chat-header {
+      flex-wrap: wrap;
+    }
+
+    .call-controls {
+      width: 100%;
+      margin-left: 0;
+    }
+
+    .call-controls select,
+    .call-controls button {
+      flex: 1;
+      min-width: 0;
+    }
+  }
+
+</style>
 </head>
 <body>
   <section class="auth-screen" id="authScreen">
@@ -554,11 +598,35 @@
             <h2 id="channelTitle">geral</h2>
             <p id="channelDescription">Converse com a comunidade</p>
           </div>
-          <div class="connection" id="connectionStatus">
-            <span class="connection-dot"></span>
-            <span id="connectionText">Conectando...</span>
-          </div>
-        </header>
+       
+<header class="chat-header">
+  <div class="channel-symbol">#</div>
+
+  <div>
+    <h2 id="channelTitle">geral</h2>
+    <p id="channelDescription">Converse com a comunidade</p>
+  </div>
+
+  <div class="connection" id="connectionStatus">
+    <span class="connection-dot"></span>
+    <span id="connectionText">Conectando...</span>
+  </div>
+
+  <div class="call-controls">
+    <select id="callUserSelect">
+      <option value="">Escolha um usuário</option>
+    </select>
+
+    <button id="voiceCallBtn" type="button">
+      📞 Chamada de voz
+    </button>
+
+    <button id="videoCallBtn" type="button">
+      🎥 Chamada de vídeo
+    </button>
+  </div>
+</header>
+
 
         <div class="notice error" id="chatNotice" role="status" aria-live="polite" hidden></div>
         <div class="messages" id="messages" aria-live="polite"></div>
