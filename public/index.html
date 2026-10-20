@@ -1,224 +1,686 @@
 
-<!DOCTYPE html>
-<html lang="pt-BR">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#101019">
-  <meta name="description" content="NEXO — seu espaço para conversar e criar comunidades.">
-  <title>NEXO — Sua comunidade</title>
-  <link rel="stylesheet" href="/style.css">
-  <script src="/socket.io/socket.io.js" defer></script>
-  <script src="/app.js" defer></script>
-</head>
-<body class="dark">
-  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+"use strict";
 
-  <div id="connectionBanner" class="connection-banner hidden">
-    Reconectando ao NEXO...
-  </div>
+const $ = (selector) => document.querySelector(selector);
 
-  <main id="authView" class="auth-view">
-    <section class="auth-card">
-      <div class="brand">
-        <div class="brand-logo">N</div>
-        <div>
-          <h1>NEXO</h1>
-          <p>Sua comunidade. Sua conexão.</p>
-        </div>
-      </div>
+let authMode = "login";
+let currentUser = null;
+let currentChannel = "geral";
+let socket = null;
+let toastTimer;
+let toastMessageTimer;
 
-      <h2>Entre na conversa</h2>
-      <p class="auth-description">
-        Conecte-se com pessoas e comunidades.
-      </p>
+const channelDescriptions = {
+  geral: "Um espaço para conversar e compartilhar ideias.",
+  jogos: "Converse sobre jogos e suas novidades.",
+  tecnologia: "Ideias, tecnologia e inovação.",
+  conversa: "Um lugar para conversas descontraídas."
+};
 
-      <div class="auth-tabs">
-        <button id="loginTab" class="auth-tab active" type="button">
-          Entrar
-        </button>
-        <button id="registerTab" class="auth-tab" type="button">
-          Criar conta
-        </button>
-      </div>
+async function api(url, options = {}) {
+  const response = await fetch(url, {
+    credentials: "same-origin",
+    ...options,
+    headers: {
+      ...(options.body ? { "Content-Type": "application/json" } : {}),
+      ...options.headers
+    }
+  });
 
-      <form id="authForm">
-        <div id="usernameLabel" class="form-field hidden">
-          <label for="username">Nome de usuário</label>
-          <input
-            id="username"
-            name="username"
-            type="text"
-            minlength="3"
-            maxlength="24"
-            pattern="[a-zA-Z0-9_]{3,24}"
-            placeholder="SeuNome"
-            autocomplete="username"
-          >
-          <small>Use de 3 a 24 letras, números ou _.</small>
-        </div>
+  const data = await response.json().catch(() => ({}));
 
-        <div class="form-field">
-          <label for="identifier">E-mail ou usuário</label>
-          <input
-            id="identifier"
-            name="identifier"
-            type="text"
-            maxlength="254"
-            placeholder="voce@exemplo.com"
-            autocomplete="username"
-            required
-          >
-        </div>
+  if (!response.ok) {
+    throw new Error(
+      data.error || "Não foi possível completar a solicitação."
+    );
+  }
 
-        <div class="form-field">
-          <label for="password">Senha</label>
-          <input
-            id="password"
-            name="password"
-            type="password"
-            minlength="6"
-            maxlength="72"
-            placeholder="Digite sua senha"
-            autocomplete="current-password"
-            required
-          >
-          <small id="passwordHint">
-            No cadastro, use pelo menos 6 caracteres.
-          </small>
-        </div>
+  return data;
+}
 
-        <p id="authError" class="error-message" role="alert"></p>
+function showToast(message) {
+  const toast = $("#toast");
 
-        <button id="authSubmit" class="primary-button" type="submit">
-          Entrar no NEXO
-        </button>
-      </form>
+  if (!toast) {
+    console.info(message);
+    return;
+  }
 
-      <p class="auth-footer">
-        Ao continuar, você estará entrando na comunidade NEXO.
-      </p>
-    </section>
-  </main>
+  toast.textContent = message;
+  toast.classList.add("show");
 
-  <main id="appView" class="app-view hidden">
-    <aside class="sidebar">
-      <div class="sidebar-brand">
-        <div class="brand-logo">N</div>
-        <strong>NEXO</strong>
-      </div>
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => {
+    toast.classList.remove("show");
+  }, 2800);
+}
 
-      <div class="sidebar-heading">CANAIS</div>
-      <nav id="channelList" class="channel-list" aria-label="Canais"></nav>
+function validatePassword(password) {
+  if (password.length < 6) {
+    return "A senha deve ter pelo menos 6 caracteres.";
+  }
 
-      <div class="sidebar-bottom">
-        <div class="user-profile">
-          <div id="userAvatar" class="user-avatar">N</div>
-          <div class="user-details">
-            <strong id="currentUsername">Usuário</strong>
-            <span>Conectado</span>
-          </div>
-        </div>
+  if (new TextEncoder().encode(password).length > 72) {
+    return "A senha não pode ultrapassar 72 bytes.";
+  }
 
-        <button id="settingsButton" class="secondary-button" type="button">
-          Personalizar
-        </button>
-        <button id="logoutButton" class="secondary-button" type="button">
-          Sair da conta
-        </button>
-      </div>
-    </aside>
+  if (!/[A-Z]/.test(password)) {
+    return "Inclua pelo menos uma letra maiúscula.";
+  }
 
-    <section class="chat-panel">
-      <header class="chat-header">
-        <div>
-          <h1>
-            <span id="channelIcon">#</span>
-            <span id="channelName">geral</span>
-          </h1>
-          <p id="channelDescription">
-            Um espaço para conversar e compartilhar ideias.
-          </p>
-        </div>
+  if (!/[a-z]/.test(password)) {
+    return "Inclua pelo menos uma letra minúscula.";
+  }
 
-        <button id="themeShortcut" class="secondary-button" type="button">
-          Aparência
-        </button>
-      </header>
+  if (!/[0-9]/.test(password)) {
+    return "Inclua pelo menos um número.";
+  }
 
-      <section id="messages" class="messages" aria-live="polite"></section>
-      <p id="chatError" class="error-message" role="alert"></p>
+  if (!/[^A-Za-z0-9]/.test(password)) {
+    return "Inclua pelo menos um símbolo, como @, # ou !.";
+  }
 
-      <form id="messageForm" class="message-form">
-        <button
-          id="emojiButton"
-          class="emoji-button"
-          type="button"
-          aria-label="Adicionar emoji"
-        >😊</button>
+  return "";
+}
 
-        <input
-          id="messageInput"
-          type="text"
-          maxlength="2000"
-          placeholder="Envie uma mensagem..."
-          autocomplete="off"
-          required
-        >
+function setAuthMode(mode) {
+  authMode = mode === "register" ? "register" : "login";
 
-        <button class="primary-button send-button" type="submit">
-          Enviar
-        </button>
-      </form>
-    </section>
+  const registering = authMode === "register";
+  const loginTab = $("#loginTab");
+  const registerTab = $("#registerTab");
+  const username = $("#username");
+  const usernameLabel = $("#usernameLabel");
+  const identifier = $("#identifier");
+  const password = $("#password");
+  const passwordHint = $("#passwordHint");
+  const submitButton = $("#authSubmit");
+  const authError = $("#authError");
 
-    <aside id="settingsPanel" class="settings-panel hidden">
-      <header class="settings-header">
-        <h2>Personalizar NEXO</h2>
-        <button id="closeSettings" class="secondary-button" type="button">
-          Fechar
-        </button>
-      </header>
+  loginTab?.classList.toggle("active", !registering);
+  registerTab?.classList.toggle("active", registering);
 
-      <div class="form-field">
-        <label for="accentColor">Cor de destaque</label>
-        <input id="accentColor" type="color" value="#8b5cf6">
-      </div>
+  if (username) {
+    username.required = registering;
+    username.disabled = !registering;
+    username.classList.toggle("hidden", !registering);
+  }
 
-      <div class="form-field">
-        <label for="themeSelect">Tema</label>
-        <select id="themeSelect">
-          <option value="dark">Escuro</option>
-          <option value="midnight">Meia-noite</option>
-          <option value="light">Claro</option>
-        </select>
-      </div>
+  usernameLabel?.classList.toggle("hidden", !registering);
 
-      <div class="form-field">
-        <label for="fontSelect">Fonte</label>
-        <select id="fontSelect">
-          <option value="inter">Padrão</option>
-          <option value="serif">Serifada</option>
-          <option value="mono">Monoespaçada</option>
-        </select>
-      </div>
+  if (identifier) {
+    identifier.placeholder = registering
+      ? "voce@exemplo.com"
+      : "E-mail ou usuário";
 
-      <div class="form-field">
-        <label for="fontSize">Tamanho da fonte</label>
-        <input id="fontSize" type="range" min="14" max="20" value="16">
-        <span id="fontSizeLabel">16 px</span>
-      </div>
+    identifier.autocomplete = registering ? "email" : "username";
+  }
 
-      <button id="saveSettings" class="primary-button" type="button">
-        Salvar aparência
-      </button>
+  if (password) {
+    password.autocomplete = registering
+      ? "new-password"
+      : "current-password";
 
-      <p id="settingsMessage" role="status"></p>
+    password.minLength = registering ? 6 : 1;
+    password.maxLength = 72;
+  }
 
-      <button id="closeRightPanel" class="secondary-button" type="button">
-        Fechar painel
-      </button>
-    </aside>
-  </main>
-</body>
-</html>
+  if (passwordHint) {
+    passwordHint.textContent = registering
+      ? "Mínimo de 6 caracteres: maiúscula, minúscula, número e símbolo."
+      : "Digite sua senha.";
+  }
+
+  if (submitButton) {
+    submitButton.textContent = registering
+      ? "Criar minha conta"
+      : "Entrar no NEXO";
+
+    submitButton.disabled = false;
+  }
+
+  if (authError) authError.textContent = "";
+}
+
+// Permite que os botões do HTML chamem diretamente esta função.
+window.nexoSetAuthMode = function (mode) {
+  setAuthMode(mode);
+};
+
+function setupAuthTabs() {
+  const loginTab = $("#loginTab");
+  const registerTab = $("#registerTab");
+
+  loginTab?.addEventListener("click", (event) => {
+    event.preventDefault();
+    setAuthMode("login");
+  });
+
+  registerTab?.addEventListener("click", (event) => {
+    event.preventDefault();
+    setAuthMode("register");
+  });
+}
+
+function setupAuthForm() {
+  const authForm = $("#authForm");
+
+  if (!authForm) {
+    console.error("NEXO: formulário #authForm não encontrado.");
+    return;
+  }
+
+  authForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+
+    const authError = $("#authError");
+    const button = $("#authSubmit");
+    const identifier = $("#identifier")?.value.trim() || "";
+    const password = $("#password")?.value || "";
+    const username = $("#username")?.value.trim() || "";
+
+    if (authError) authError.textContent = "";
+
+    if (authMode === "register") {
+      if (!/^[a-zA-Z0-9_]{3,24}$/.test(username)) {
+        if (authError) {
+          authError.textContent =
+            "Use um nome de 3 a 24 caracteres: letras, números ou _.";
+        }
+        return;
+      }
+
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(identifier)) {
+        if (authError) authError.textContent = "Digite um e-mail válido.";
+        return;
+      }
+
+      const passwordError = validatePassword(password);
+
+      if (passwordError) {
+        if (authError) authError.textContent = passwordError;
+        return;
+      }
+    }
+
+    if (!identifier || !password) {
+      if (authError) {
+        authError.textContent = "Preencha o e-mail/usuário e a senha.";
+      }
+      return;
+    }
+
+    if (button) {
+      button.disabled = true;
+      button.textContent = "Aguarde...";
+    }
+
+    try {
+      let result;
+
+      if (authMode === "register") {
+        result = await api("/api/register", {
+          method: "POST",
+          body: JSON.stringify({
+            username,
+            email: identifier,
+            password
+          })
+        });
+      } else {
+        result = await api("/api/login", {
+          method: "POST",
+          body: JSON.stringify({
+            identifier,
+            password
+          })
+        });
+      }
+
+      currentUser = result.user;
+      await enterApp();
+    } catch (error) {
+      if (authError) authError.textContent = error.message;
+    } finally {
+      if (button) {
+        button.disabled = false;
+        button.textContent = authMode === "register"
+          ? "Criar minha conta"
+          : "Entrar no NEXO";
+      }
+    }
+  });
+}
+
+async function enterApp() {
+  if (!currentUser) return;
+
+  $("#authView")?.classList.add("hidden");
+  $("#appView")?.classList.remove("hidden");
+
+  if ($("#currentUsername")) {
+    $("#currentUsername").textContent = currentUser.username;
+  }
+
+  if ($("#userAvatar")) {
+    $("#userAvatar").textContent =
+      currentUser.username.charAt(0).toUpperCase();
+  }
+
+  applySavedSettings();
+
+  try {
+    await loadChannels();
+    connectSocket();
+  } catch (error) {
+    console.error("Erro ao carregar os canais:", error.message);
+    showToast("Erro ao carregar os canais. Atualize a página.");
+  }
+}
+
+async function loadChannels() {
+  const channels = await api("/api/channels");
+  const list = $("#channelList");
+
+  if (!list) return;
+
+  list.replaceChildren();
+
+  for (const item of channels) {
+    const channel = typeof item === "string"
+      ? { id: item, name: item, icon: "#" }
+      : item;
+
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "channel-btn";
+    button.dataset.channel = channel.id;
+
+    const icon = document.createElement("span");
+    icon.className = "channel-hash";
+    icon.textContent = channel.icon || "#";
+
+    const name = document.createElement("span");
+    name.textContent = channel.name || channel.id;
+
+    button.append(icon, name);
+    button.addEventListener("click", () => selectChannel(channel.id));
+    list.append(button);
+  }
+
+  updateChannelHeader();
+}
+
+function updateChannelHeader() {
+  const button = document.querySelector(
+    `.channel-btn[data-channel="${currentChannel}"]`
+  );
+
+  if ($("#channelName")) {
+    $("#channelName").textContent = button
+      ? button.querySelector("span:last-child").textContent
+      : currentChannel;
+  }
+
+  if ($("#channelIcon")) $("#channelIcon").textContent = "#";
+
+  if ($("#channelDescription")) {
+    $("#channelDescription").textContent =
+      channelDescriptions[currentChannel] ||
+      "Converse com sua comunidade.";
+  }
+
+  document.querySelectorAll(".channel-btn").forEach((item) => {
+    item.classList.toggle(
+      "active",
+      item.dataset.channel === currentChannel
+    );
+  });
+}
+
+function selectChannel(channel) {
+  currentChannel = channel;
+
+  updateChannelHeader();
+
+  $("#messages")?.replaceChildren();
+  addWelcomeMessage();
+
+  if (socket?.connected) {
+    socket.emit("join channel", channel);
+  }
+}
+
+function addWelcomeMessage() {
+  const messages = $("#messages");
+  if (!messages) return;
+
+  const welcome = document.createElement("div");
+  welcome.className = "welcome-card";
+
+  const symbol = document.createElement("div");
+  symbol.className = "welcome-symbol";
+  symbol.textContent = "✦";
+
+  const heading = document.createElement("h2");
+  heading.textContent = `Bem-vindo ao #${currentChannel}`;
+
+  const description = document.createElement("p");
+  description.textContent =
+    "Comece uma nova conversa com a comunidade.";
+
+  welcome.append(symbol, heading, description);
+  messages.append(welcome);
+}
+
+function addMessage(message) {
+  const messages = $("#messages");
+
+  if (!messages || message.channel !== currentChannel) return;
+
+  messages.querySelector(".welcome-card")?.remove();
+
+  const article = document.createElement("article");
+  article.className = "message";
+
+  const avatar = document.createElement("div");
+  avatar.className = "message-avatar";
+  avatar.textContent = String(message.username || "?")
+    .charAt(0).toUpperCase();
+
+  const body = document.createElement("div");
+  body.className = "message-body";
+
+  const meta = document.createElement("div");
+  meta.className = "message-meta";
+
+  const username = document.createElement("strong");
+  username.textContent = message.username || "Usuário";
+
+  const time = document.createElement("time");
+  const date = new Date(message.created_at);
+
+  time.dateTime = Number.isNaN(date.getTime()) ? "" : date.toISOString();
+  time.textContent = Number.isNaN(date.getTime())
+    ? ""
+    : date.toLocaleTimeString("pt-BR", {
+        hour: "2-digit",
+        minute: "2-digit"
+      });
+
+  const text = document.createElement("div");
+  text.className = "message-text";
+  text.textContent = message.message;
+
+  meta.append(username, time);
+  body.append(meta, text);
+  article.append(avatar, body);
+  messages.append(article);
+
+  messages.scrollTop = messages.scrollHeight;
+}
+
+function connectSocket() {
+  if (typeof io !== "function") {
+    showToast("Não foi possível carregar o chat.");
+    return;
+  }
+
+  if (socket) socket.disconnect();
+  socket = io();
+
+  socket.on("connect", () => {
+    $("#connectionBanner")?.classList.add("hidden");
+    socket.emit("join channel", currentChannel);
+  });
+
+  socket.on("disconnect", () => {
+    $("#connectionBanner")?.classList.remove("hidden");
+  });
+
+  socket.on("connect_error", (error) => {
+    $("#connectionBanner")?.classList.remove("hidden");
+    console.error("Falha na conexão:", error.message);
+  });
+
+  socket.on("chat history", (history) => {
+    $("#messages")?.replaceChildren();
+    addWelcomeMessage();
+    history.forEach(addMessage);
+  });
+
+  socket.on("chat message", addMessage);
+
+  socket.on("chat error", (message) => {
+    const error = $("#chatError");
+    if (error) error.textContent = message;
+
+    clearTimeout(toastMessageTimer);
+
+    toastMessageTimer = setTimeout(() => {
+      if (error) error.textContent = "";
+    }, 3500);
+  });
+}
+
+$("#messageForm")?.addEventListener("submit", (event) => {
+  event.preventDefault();
+
+  const input = $("#messageInput");
+  const message = input?.value.trim() || "";
+
+  if (!message || !socket?.connected) {
+    if (!socket?.connected) showToast("Reconectando ao chat...");
+    return;
+  }
+
+  socket.emit("send message", {
+    channel: currentChannel,
+    message
+  });
+
+  input.value = "";
+  input.focus();
+});
+
+$("#emojiButton")?.addEventListener("click", (event) => {
+  event.preventDefault();
+
+  const input = $("#messageInput");
+  if (!input) return;
+
+  input.value += " 😊";
+  input.focus();
+});
+
+$("#logoutButton")?.addEventListener("click", async (event) => {
+  event.preventDefault();
+
+  try {
+    await api("/api/logout", { method: "POST" });
+
+    socket?.disconnect();
+    socket = null;
+    currentUser = null;
+
+    $("#appView")?.classList.add("hidden");
+    $("#authView")?.classList.remove("hidden");
+
+    $("#authForm")?.reset();
+    setAuthMode("login");
+
+    showToast("Você saiu da sua conta.");
+  } catch (error) {
+    showToast(error.message);
+  }
+});
+
+function openSettings() {
+  $("#settingsPanel")?.classList.remove("hidden");
+}
+
+function closeSettings() {
+  $("#settingsPanel")?.classList.add("hidden");
+}
+
+$("#settingsButton")?.addEventListener("click", openSettings);
+$("#themeShortcut")?.addEventListener("click", openSettings);
+$("#closeSettings")?.addEventListener("click", closeSettings);
+$("#closeRightPanel")?.addEventListener("click", closeSettings);
+
+function validColor(value) {
+  return /^#[0-9a-f]{6}$/i.test(value) ? value : "#8b5cf6";
+}
+
+function applySettings(settings) {
+  document.documentElement.style.setProperty(
+    "--accent",
+    validColor(settings.accent)
+  );
+
+  document.documentElement.style.setProperty(
+    "--font-size",
+    `${Math.max(14, Math.min(20, Number(settings.fontSize) || 16)}px`
+  );
+
+  document.body.classList.remove(
+    "dark", "midnight", "light", "serif", "mono"
+  );
+
+  document.body.classList.add(
+    ["dark", "midnight", "light"].includes(settings.theme)
+      ? settings.theme
+      : "dark"
+  );
+
+  if (settings.font === "serif") {
+    document.body.classList.add("serif");
+  }
+
+  if (settings.font === "mono") {
+    document.body.classList.add("mono");
+  }
+
+  if ($("#accentColor")) {
+    $("#accentColor").value = validColor(settings.accent);
+  }
+
+  if ($("#themeSelect")) {
+    $("#themeSelect").value = settings.theme || "dark";
+  }
+
+  if ($("#fontSelect")) {
+    $("#fontSelect").value = settings.font || "inter";
+  }
+
+  if ($("#fontSize")) {
+    $("#fontSize").value = settings.fontSize || 16;
+  }
+
+  if ($("#fontSizeLabel")) {
+    $("#fontSizeLabel").textContent =
+      `${$("#fontSize")?.value || 16} px`;
+  }
+}
+
+function readSettings() {
+  return {
+    accent: $("#accentColor")?.value || "#8b5cf6",
+    theme: $("#themeSelect")?.value || "dark",
+    font: $("#fontSelect")?.value || "inter",
+    fontSize: Number($("#fontSize")?.value) || 16
+  };
+}
+
+function applySavedSettings() {
+  let settings = {};
+
+  try {
+    settings = JSON.parse(
+      localStorage.getItem("nexo-settings") || "{}"
+    );
+  } catch {
+    settings = {};
+  }
+
+  applySettings({
+    accent: settings.accent || "#8b5cf6",
+    theme: settings.theme || "dark",
+    font: settings.font || "inter",
+    fontSize: settings.fontSize || 16
+  });
+}
+
+$("#fontSize")?.addEventListener("input", () => {
+  if ($("#fontSizeLabel")) {
+    $("#fontSizeLabel").textContent = `${$("#fontSize").value} px`;
+  }
+
+  applySettings(readSettings());
+});
+
+$("#accentColor")?.addEventListener("input", () => {
+  applySettings(readSettings());
+});
+
+$("#themeSelect")?.addEventListener("change", () => {
+  applySettings(readSettings());
+});
+
+$("#fontSelect")?.addEventListener("change", () => {
+  applySettings(readSettings());
+});
+
+$("#saveSettings")?.addEventListener("click", (event) => {
+  event.preventDefault();
+
+  try {
+    const settings = readSettings();
+
+    localStorage.setItem("nexo-settings", JSON.stringify(settings));
+    applySettings(settings);
+
+    if ($("#settingsMessage")) {
+      $("#settingsMessage").textContent =
+        "Aparência salva neste navegador.";
+    }
+
+    showToast("Personalização aplicada!");
+  } catch {
+    if ($("#settingsMessage")) {
+      $("#settingsMessage").textContent =
+        "Não foi possível salvar as configurações.";
+    }
+  }
+});
+
+async function restoreSession() {
+  try {
+    const result = await api("/api/me");
+
+    if (result.authenticated && result.user) {
+      currentUser = result.user;
+      await enterApp();
+    }
+  } catch (error) {
+    console.error("Erro ao restaurar a sessão:", error.message);
+  }
+}
+
+function initialize() {
+  setupAuthTabs();
+  setupAuthForm();
+  setAuthMode("login");
+
+  if (!$("#loginTab") || !$("#registerTab")) {
+    console.error("NEXO: botões de autenticação não encontrados.");
+  }
+
+  restoreSession();
+}
+
+if (document.readyState === "loading") {
+  document.addEventListener("DOMContentLoaded", initialize, { once: true });
+} else {
+  initialize();
+}
