@@ -1400,23 +1400,25 @@ function showCallWindow() {
   callOverlay.hidden = false;
 }
 
-  function updateCallButtons() {
+  
+function updateCallButtons() {
   const inCall = callPeerId !== null && callPeerId !== undefined;
 
   voiceCallBtn.disabled = inCall;
   videoCallBtn.disabled = inCall;
   callUserSelect.disabled = inCall;
-}
-
 
   const videoCallActive =
     inCall &&
     callMode === "video" &&
     localStream !== null &&
-    localStream.getVideoTracks().some(track => track.readyState === "live");
+    localStream.getVideoTracks().some(
+      track => track.readyState === "live"
+    );
 
   switchCameraBtn.hidden = !videoCallActive;
 }
+
 
 function resetCallInterface() {
   stopRingtone();
