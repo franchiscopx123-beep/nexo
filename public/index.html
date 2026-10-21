@@ -1510,21 +1510,26 @@ async function switchCamera() {
   try {
     const currentTrack = localStream.getVideoTracks()[0];
 
-    if (!currentTrack) {
-      throw new Error("Nenhuma câmera está ativa.");
-    }
+   if (!currentTrack) {
+  throw new Error("Nenhuma câmera está ativa.");
+}
 
-    const currentSettings = currentTrack.getSettings();
-    const currentDeviceId = currentSettings.deviceId;
-    const nextFacing =
-      (currentSettings.facingMode || currentCameraFacing) === "environment"
-        ? "user"
-        : "environment";
+const currentSettings = currentTrack.getSettings();
+const currentDeviceId = currentSettings.deviceId;
+
+const currentFacing =
+  currentSettings.facingMode || currentCameraFacing || "user";
+
+const nextFacing =
+  currentFacing === "environment" ? "user" : "environment";
+
+console.log("[NEXO] Lado atual:", currentFacing);
+console.log("[NEXO] Próximo lado:", nextFacing);
 
 console.log(
   "[NEXO] Câmera atual:",
   currentTrack.label,
-  currentSettings.deviceId,
+  currentDeviceId,
   currentSettings.facingMode
 );
 
