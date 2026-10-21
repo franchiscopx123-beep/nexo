@@ -1651,10 +1651,12 @@ console.log(
 } catch (error) {
   console.error("[NEXO] Erro ao trocar câmera:", error);
 
-  showNotice(
-      chatNotice,
-      error.message || "Não foi possível trocar a câmera."
-    );
+  const mensagemErro =
+    error.message || "Não foi possível trocar a câmera.";
+
+  callStatus.textContent = mensagemErro;
+
+  showNotice(chatNotice, mensagemErro);
 
   } finally {
     if (newStream && !cameraChanged) {
