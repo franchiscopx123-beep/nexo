@@ -165,11 +165,10 @@ function validChannel(channel) {
 function validPassword(password) {
   return (
     typeof password === "string" &&
-    password.length >= 8 &&
+    password.length >= 6 &&
     password.length <= 72
   );
 }
-
 function validMessage(message) {
   return (
     typeof message === "string" &&
