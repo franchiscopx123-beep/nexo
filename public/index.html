@@ -1492,6 +1492,7 @@ async function getCallMedia(mode) {
   });
 }
 
+
 async function switchCamera() {
   if (
     !localStream ||
@@ -1503,94 +1504,98 @@ async function switchCamera() {
   }
 
   switchCameraBtn.disabled = true;
-  console.log("[NEXO] switchCamera iniciou");
+
+  const currentTrack = localStream.getVideoTracks()[0];
+
+  if (!currentTrack) {
+    callStatus.textContent = "Nenhuma câmera está ativa.";
+    switchCameraBtn.disabled = false;
+    return;
+  }
+
+  const oldDeviceId = currentTrack.getSettings().deviceId;
+  const oldFacing =
+    currentTrack.getSettings().facingMode ||
+    currentCameraFacing ||
+    "user";
 
   let newStream = null;
   let cameraChanged = false;
+  let oldTrackStopped = false;
+  let newTrack = null;
+
+  const sender = peerConnection
+    .getSenders()
+    .find(item => item.track?.kind === "video");
+
+  if (!sender) {
+    callStatus.textContent = "Transmissão de vídeo não encontrada.";
+    switchCameraBtn.disabled = false;
+    return;
+  }
 
   try {
-    const currentTrack = localStream.getVideoTracks()[0];
+    callStatus.textContent = "Procurando outra câmera...";
 
-   if (!currentTrack) {
-  throw new Error("Nenhuma câmera está ativa.");
-}
+    const devices =
+      await navigator.mediaDevices.enumerateDevices();
 
-const currentSettings = currentTrack.getSettings();
-const currentDeviceId = currentSettings.deviceId;
+    const cameras = devices.filter(
+      device => device.kind === "videoinput"
+    );
 
-const currentFacing =
-  currentSettings.facingMode || currentCameraFacing || "user";
+    console.log(
+      "[NEXO] Câmeras detectadas:",
+      cameras.map(camera => ({
+        label: camera.label,
+        deviceId: camera.deviceId
+      }))
+    );
 
-const nextFacing =
-  currentFacing === "environment" ? "user" : "environment";
+    const otherCamera = cameras.find(
+      camera =>
+        camera.deviceId &&
+        camera.deviceId !== oldDeviceId
+    );
 
-console.log("[NEXO] Lado atual:", currentFacing);
-console.log("[NEXO] Próximo lado:", nextFacing);
-
-console.log(
-  "[NEXO] Câmera atual:",
-  currentTrack.label,
-  currentDeviceId,
-  currentSettings.facingMode
-);
-
-console.log("[NEXO] Destino solicitado:", nextFacing);
-
-// 1. Tenta selecionar a câmera pelo lado desejado.
-try {
-  newStream = await navigator.mediaDevices.getUserMedia({
-        audio: false,
-        video: {
-          facingMode: { ideal: nextFacing },
-          width: { ideal: 1280 },
-          height: { ideal: 720 }
-        }
-      });
-    } catch (error) {
-      console.warn("[NEXO] Tentativa por facingMode falhou:", error);
+    if (!otherCamera) {
+      throw new Error(
+        "O Android não informou outra câmera disponível."
+      );
     }
 
-    let newTrack = newStream?.getVideoTracks()[0];
+    callStatus.textContent = "Abrindo a outra câmera...";
 
-    // 2. Se a câmera não mudou, procura outro dispositivo.
-    if (
-      !newTrack ||
-      (
-        currentDeviceId &&
-        newTrack.getSettings().deviceId === currentDeviceId
-      )
-    ) {
-      if (newStream) {
+    // Primeira tentativa: manter a câmera atual ativa.
+    try {
+      newStream = await navigator.mediaDevices.getUserMedia({
+        audio: false,
+        video: {
+          deviceId: { exact: otherCamera.deviceId }
+        }
+      });
+
+      newTrack = newStream.getVideoTracks()[0];
+
+      if (
+        !newTrack ||
+        newTrack.getSettings().deviceId === oldDeviceId
+      ) {
         newStream.getTracks().forEach(track => track.stop());
         newStream = null;
+        newTrack = null;
+
+        throw new Error("O navegador manteve a câmera anterior.");
       }
-
-      const devices =
-        await navigator.mediaDevices.enumerateDevices();
-
-      const cameras = devices.filter(
-        device => device.kind === "videoinput"
+    } catch (firstError) {
+      console.warn(
+        "[NEXO] Primeira tentativa falhou:",
+        firstError
       );
 
-      console.log(
-        "[NEXO] Câmeras disponíveis:",
-        cameras.map(camera => ({
-          label: camera.label,
-          deviceId: camera.deviceId
-        }))
-      );
-
-      const otherCamera = cameras.find(
-        camera =>
-          camera.deviceId &&
-          camera.deviceId !== currentDeviceId
-      );
-
-      if (!otherCamera) {
-        throw new Error(
-          "Não foi encontrada outra câmera. Verifique as permissões do navegador."
-        );
-      }
+      // Segunda tentativa: liberar a câmera atual primeiro.
+      currentTrack.stop();
+      oldTrackStopped = true;
 
       newStream = await navigator.mediaDevices.getUserMedia({
         audio: false,
@@ -1600,31 +1605,17 @@ try {
       });
 
       newTrack = newStream.getVideoTracks()[0];
+
+      if (
+        !newTrack ||
+        newTrack.getSettings().deviceId === oldDeviceId
+      ) {
+        throw new Error(
+          "O Android continuou selecionando a câmera anterior."
+        );
+      }
     }
 
-    if (!newTrack) {
-      throw new Error("Não foi possível abrir a outra câmera.");
-    }
-
-    // Não troca para a mesma câmera.
-    if (
-      currentDeviceId &&
-      newTrack.getSettings().deviceId === currentDeviceId
-    ) {
-      throw new Error(
-        "O navegador abriu a mesma câmera. Não foi possível alternar."
-      );
-    }
-
-    const sender = peerConnection
-      .getSenders()
-      .find(item => item.track?.kind === "video");
-
-    if (!sender) {
-      throw new Error("Transmissão de vídeo não encontrada.");
-    }
-
-    // 3. Substitui a faixa enviada na chamada.
     await sender.replaceTrack(newTrack);
 
     localStream.removeTrack(currentTrack);
@@ -1634,39 +1625,79 @@ try {
     await localVideo.play().catch(() => {});
 
     currentCameraFacing =
-      newTrack.getSettings().facingMode || nextFacing;
+      newTrack.getSettings().facingMode ||
+      (oldFacing === "environment" ? "user" : "environment");
 
-    currentTrack.stop();
     cameraChanged = true;
-callStatus.textContent = "Câmera alterada.";
 
-console.log("[NEXO] Câmera nova:", newTrack.getSettings());
+    // A câmera antiga já foi liberada, se necessário.
+    if (!oldTrackStopped) {
+      currentTrack.stop();
+    }
 
-console.log(
-  "[NEXO] Nova câmera identificada:",
-  newTrack.label,
-  newTrack.getSettings().deviceId,
-  newTrack.getSettings().facingMode
-);
-} catch (error) {
-  console.error("[NEXO] Erro ao trocar câmera:", error);
+    callStatus.textContent = "Câmera alterada com sucesso.";
 
-  const mensagemErro =
-    error.message || "Não foi possível trocar a câmera.";
+    console.log("[NEXO] Nova câmera:", {
+      label: newTrack.label,
+      settings: newTrack.getSettings()
+    });
 
-  callStatus.textContent = mensagemErro;
+  } catch (error) {
+    console.error("[NEXO] Erro ao trocar câmera:", error);
 
-  showNotice(chatNotice, mensagemErro);
+    // Se a câmera antiga precisou ser liberada e a nova falhou,
+    // tenta restaurar a câmera anterior.
+    if (oldTrackStopped && !cameraChanged) {
+      try {
+        const restoreConstraints = oldDeviceId
+          ? { deviceId: { exact: oldDeviceId } }
+          : { facingMode: { ideal: oldFacing } };
+
+        const restoredStream =
+          await navigator.mediaDevices.getUserMedia({
+            audio: false,
+            video: restoreConstraints
+          });
+
+        const restoredTrack = restoredStream.getVideoTracks()[0];
+
+        if (restoredTrack) {
+          await sender.replaceTrack(restoredTrack);
+
+          localStream.removeTrack(currentTrack);
+          localStream.addTrack(restoredTrack);
+
+          localVideo.srcObject = localStream;
+          await localVideo.play().catch(() => {});
+
+          currentCameraFacing =
+            restoredTrack.getSettings().facingMode || oldFacing;
+        }
+
+        restoredStream.getTracks().forEach(track => {
+          if (track !== restoredTrack) track.stop();
+        });
+      } catch (restoreError) {
+        console.error(
+          "[NEXO] Não foi possível restaurar a câmera anterior:",
+          restoreError
+        );
+      }
+    }
+
+    callStatus.textContent =
+      "Falha ao trocar câmera: " +
+      (error.message || "erro desconhecido");
 
   } finally {
     if (newStream && !cameraChanged) {
       newStream.getTracks().forEach(track => track.stop());
     }
-    console.log("[NEXO] switchCamera terminou");
+
     switchCameraBtn.disabled = false;
   }
 }
-function createPeerConnection() {
+
   if (!localStream) {
     throw new Error("O microfone ou a câmera ainda não foram inicializados.");
   }
