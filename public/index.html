@@ -1161,6 +1161,8 @@ console.log("[NEXO] Cadastro concluído:", data);
     async function joinChannel(channel) {
       if (!channels.includes(channel)) return;
 
+      showConversations();
+
       currentChannel = channel;
       renderedMessageIds = new Set();
       renderChannels();
