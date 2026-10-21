@@ -352,7 +352,14 @@
       color: #9caec7;
     }
 
-    .chat-main { min-width: 0; display: flex; flex-direction: column; }
+  
+.chat-main {
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
 
     .chat-header {
       min-height: 78px;
@@ -2386,13 +2393,17 @@ initialize();
     const messagesPanel = document.getElementById("messages");
     const messageFormPanel = document.getElementById("messageForm");
 
-    function showConversations() {
-      if (nearbyPanel) nearbyPanel.hidden = true;
-      if (chatHeader) chatHeader.hidden = false;
-      if (messagesPanel) messagesPanel.hidden = false;
-      if (messageFormPanel) messageFormPanel.hidden = false;
-    }
+function showConversations() {
+  if (nearbyPanel) nearbyPanel.hidden = true;
 
+  if (chatHeader) chatHeader.hidden = false;
+  if (messagesPanel) messagesPanel.hidden = false;
+
+  if (messageFormPanel) {
+    messageFormPanel.hidden = false;
+    messageFormPanel.style.display = "flex";
+  }
+}
     document.querySelectorAll("[data-section]").forEach((button) => {
       button.addEventListener("click", () => {
         const section = button.dataset.section;
