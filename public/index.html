@@ -872,19 +872,26 @@
   throw new Error("A senha precisa ter pelo menos 8 caracteres.");
 }
 
-          data = await api("/api/register", {
-            method: "POST",
-            body: JSON.stringify({ username, email, password })
-          });
-        } else {
-          data = await api("/api/login", {
-            method: "POST",
-            body: JSON.stringify({
-              identifier: identifierInput.value.trim(),
-              password: passwordInput.value
-            })
-          });
-        }
+       if (password.length < 6) {
+  throw new Error("A senha precisa ter pelo menos 6 caracteres.");
+}
+
+data = await api("/api/register", {
+  method: "POST",
+  body: JSON.stringify({ username, email, password })
+});
+
+console.log("[NEXO] Cadastro concluído:", data);
+
+} else {
+  data = await api("/api/login", {
+    method: "POST",
+    body: JSON.stringify({
+      identifier: identifierInput.value.trim(),
+      password: passwordInput.value
+    })
+  });
+}
 
         currentUser = data.user || data;
 
