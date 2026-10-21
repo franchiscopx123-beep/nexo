@@ -1479,6 +1479,7 @@ async function getCallMedia(mode) {
 }
 
 
+
 async function switchCamera() {
   if (!localStream || !peerConnection || callMode !== "video") {
     showNotice(chatNotice, "Inicie ou atenda uma chamada de vídeo primeiro.");
@@ -1497,58 +1498,66 @@ async function switchCamera() {
       throw new Error("A câmera atual não está ativa.");
     }
 
-    const currentDeviceId = currentTrack.getSettings().deviceId;
-    const devices = await navigator.mediaDevices.enumerateDevices();
-    const cameras = devices.filter(
-      device => device.kind === "videoinput"
+    const currentSettings = currentTrack.getSettings();
+    const currentDeviceId = currentSettings.deviceId;
+    const currentFacing =
+      currentSettings.facingMode || currentCameraFacing || "user";
+
+    const nextFacing =
+      currentFacing === "environment" ? "user" : "environment";
+
+    const sender = peerConnection.getSenders().find(
+      item => item.track === currentTrack
+    ) || peerConnection.getSenders().find(
+      item => item.track?.kind === "video"
     );
 
-    let constraints;
+    if (!sender) {
+      throw new Error("Não foi encontrado o transmissor de vídeo.");
+    }
 
-    if (cameras.length > 1) {
-      const currentIndex = cameras.findIndex(
-        camera => camera.deviceId === currentDeviceId
-      );
-
-      const nextCamera = cameras[
-        (currentIndex + 1 + cameras.length) % cameras.length
-      ];
-
-      if (!nextCamera || nextCamera.deviceId === currentDeviceId) {
-        throw new Error("Não foi encontrada outra câmera.");
-      }
-
-      constraints = {
-        video: {
-          deviceId: { exact: nextCamera.deviceId },
-          width: { ideal: 1280 },
-          height: { ideal: 720 }
-        },
-        audio: false
-      };
-    } else {
-      const facing = currentTrack.getSettings().facingMode;
-      const nextFacing = facing === "user" ? "environment" : "user";
-
-      constraints = {
+    // Primeiro, tenta alternar entre frontal e traseira.
+    try {
+      newStream = await navigator.mediaDevices.getUserMedia({
+        audio: false,
         video: {
           facingMode: { exact: nextFacing },
           width: { ideal: 1280 },
           height: { ideal: 720 }
-        },
-        audio: false
-      };
+        }
+      });
+    } catch (facingError) {
+      // Alternativa para aparelhos que não aceitam facingMode.
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const cameras = devices.filter(
+        device => device.kind === "videoinput"
+      );
+
+      const otherCamera = cameras.find(
+        camera =>
+          camera.deviceId &&
+          currentDeviceId &&
+          camera.deviceId !== currentDeviceId
+      );
+
+      if (!otherCamera) {
+        throw facingError;
+      }
+
+      newStream = await navigator.mediaDevices.getUserMedia({
+        audio: false,
+        video: {
+          deviceId: { exact: otherCamera.deviceId },
+          width: { ideal: 1280 },
+          height: { ideal: 720 }
+        }
+      });
     }
 
-    newStream = await navigator.mediaDevices.getUserMedia(constraints);
-
     const newTrack = newStream.getVideoTracks()[0];
-    const sender = peerConnection.getSenders().find(
-      item => item.track?.kind === "video"
-    );
 
-    if (!newTrack || !sender) {
-      throw new Error("Não foi possível preparar a nova câmera.");
+    if (!newTrack) {
+      throw new Error("A nova câmera não forneceu vídeo.");
     }
 
     await sender.replaceTrack(newTrack);
@@ -1557,27 +1566,32 @@ async function switchCamera() {
     localStream.addTrack(newTrack);
 
     localVideo.srcObject = localStream;
-    await localVideo.play().catch(() => {});
+
+    try {
+      await localVideo.play();
+    } catch (error) {
+      console.warn("Não foi possível atualizar a prévia local:", error);
+    }
 
     currentCameraFacing =
-      newTrack.getSettings().facingMode || currentCameraFacing;
+      newTrack.getSettings().facingMode || nextFacing;
 
     currentTrack.stop();
     switched = true;
 
-    callStatus.textContent = "Câmera alterada com sucesso.";
     hideNotice(chatNotice);
+    callStatus.textContent =
+      currentCameraFacing === "environment"
+        ? "Câmera traseira ativada."
+        : "Câmera frontal ativada.";
 
   } catch (error) {
     console.error("Erro ao virar a câmera:", error);
 
-    const message =
-      error.name === "OverconstrainedError" ||
-      error.name === "NotFoundError"
-        ? "Não foi encontrada outra câmera compatível. Verifique se seu dispositivo tem câmera frontal e traseira ou outra webcam."
-        : error.message || "Não foi possível trocar a câmera.";
-
-    showNotice(chatNotice, message);
+    showNotice(
+      chatNotice,
+      "Não foi possível trocar a câmera. Verifique a permissão da câmera e tente novamente."
+    );
   } finally {
     if (newStream && !switched) {
       newStream.getTracks().forEach(track => track.stop());
@@ -1586,6 +1600,7 @@ async function switchCamera() {
     switchCameraBtn.disabled = false;
   }
 }
+
 
 function createPeerConnection() {
   if (!localStream) {
