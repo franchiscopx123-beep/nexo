@@ -631,7 +631,33 @@
   box-shadow: 0 20px 40px rgba(0, 0, 0, 0.6);
 }
 
-/* Transforma os botões em círculos modernos idênticos aos da referência */
+/* =========================================
+   BARRA FLUTUANTE E BOTÕES CIRCULARES (NEXO)
+   ========================================= */
+
+#incomingCallActions,
+#activeCallActions {
+  position: absolute;
+  bottom: 32px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  width: auto;
+  margin: 0;
+  padding: 12px 24px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 40px;
+  background: rgba(11, 19, 34, 0.75);
+  -webkit-backdrop-filter: blur(16px);
+  backdrop-filter: blur(16px);
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.6);
+}
+
+/* Transforma todos os botões em círculos perfeitos e esconde qualquer texto herdado */
 #callOverlay button {
   display: inline-flex;
   align-items: center;
@@ -644,8 +670,8 @@
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 50%;
   background: #1e293b;
-  color: #fff;
-  font-size: 18px; /* Ajusta o tamanho do emoji/ícone */
+  color: transparent !important; /* Torna qualquer texto antigo invisível */
+  font-size: 0px !important;     /* Remove o espaço do texto */
   cursor: pointer;
   transition: all 0.2s ease;
   box-shadow: 0 4px 12px rgba(0,0,0,0.3);
@@ -653,12 +679,26 @@
   white-space: nowrap;
 }
 
+/* Força a exibição correta apenas do emoji inserido no HTML */
+#callOverlay button::before {
+  font-size: 20px !important;
+  color: #fff !important;
+  display: block;
+}
+
+/* Associa o emoji correspondente a cada ID de botão de forma segura */
+#acceptCallBtn::before { content: "📞"; }
+#declineCallBtn::before { content: "❌"; }
+#muteCallBtn::before { content: "🎤"; }
+#switchCameraBtn::before { content: "🔄"; }
+#endCallBtn::before { content: "📞"; }
+
 #callOverlay button:hover:not(:disabled) {
   background: #334155;
   transform: scale(1.08);
 }
 
-/* Cores específicas dos botões circulares */
+/* Cores específicas de destaque */
 #acceptCallBtn {
   background: #059669 !important;
   border-color: #10b981 !important;
@@ -678,7 +718,7 @@
   background: #2563eb;
 }
 
-/* Responsividade para telas menores */
+/* Responsividade para telas menores / celulares */
 @media (max-width: 640px) {
   #incomingCallActions,
   #activeCallActions {
@@ -690,7 +730,10 @@
   #callOverlay button {
     width: 46px;
     height: 46px;
-    font-size: 16px;
+  }
+
+  #callOverlay button::before {
+    font-size: 18px !important;
   }
 }
 </style>
