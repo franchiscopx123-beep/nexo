@@ -807,7 +807,7 @@
     </div>
   </section>
 
-  <!-- Janela de chamada de voz e vídeo -->
+ <!-- Janela de chamada de voz e vídeo (Apenas com Emojis) -->
   <div id="callOverlay" hidden>
     <div class="call-card">
       <h2 id="callTitle">Chamada</h2>
@@ -817,15 +817,15 @@
       <video id="localVideo" autoplay playsinline muted></video>
 
       <div id="incomingCallActions" hidden>
-        <button id="acceptCallBtn" type="button">Atender</button>
-        <button id="declineCallBtn" type="button">Recusar</button>
+        <button id="acceptCallBtn" type="button" title="Atender chamada">📞</button>
+        <button id="declineCallBtn" type="button" title="Recusar chamada">❌</button>
       </div>
 
-<div id="activeCallActions" hidden>
-  <button id="muteCallBtn" type="button" title="Silenciar microfone">🎤</button>
-  <button id="switchCameraBtn" type="button" title="Virar câmera" hidden>🔄</button>
-  <button id="endCallBtn" type="button" title="Encerrar chamada">📞</button>
-</div>
+      <div id="activeCallActions" hidden>
+        <button id="muteCallBtn" type="button" title="Silenciar microfone">🎤</button>
+        <button id="switchCameraBtn" type="button" title="Virar câmera" hidden>🔄</button>
+        <button id="endCallBtn" type="button" title="Encerrar chamada">📞</button>
+      </div>
     </div>
   </div>
 
