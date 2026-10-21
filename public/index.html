@@ -1521,12 +1521,18 @@ async function switchCamera() {
         ? "user"
         : "environment";
 
-    console.log("[NEXO] Câmera atual:", currentSettings);
-    console.log("[NEXO] Destino solicitado:", nextFacing);
+console.log(
+  "[NEXO] Câmera atual:",
+  currentTrack.label,
+  currentSettings.deviceId,
+  currentSettings.facingMode
+);
 
-    // 1. Tenta selecionar a câmera pelo lado desejado.
-    try {
-      newStream = await navigator.mediaDevices.getUserMedia({
+console.log("[NEXO] Destino solicitado:", nextFacing);
+
+// 1. Tenta selecionar a câmera pelo lado desejado.
+try {
+  newStream = await navigator.mediaDevices.getUserMedia({
         audio: false,
         video: {
           facingMode: { ideal: nextFacing },
@@ -1626,15 +1632,20 @@ async function switchCamera() {
 
     currentTrack.stop();
     cameraChanged = true;
+callStatus.textContent = "Câmera alterada.";
 
-    callStatus.textContent = "Câmera alterada.";
+console.log("[NEXO] Câmera nova:", newTrack.getSettings());
 
-    console.log("[NEXO] Nova câmera:", newTrack.getSettings());
+console.log(
+  "[NEXO] Nova câmera identificada:",
+  newTrack.label,
+  newTrack.getSettings().deviceId,
+  newTrack.getSettings().facingMode
+);
+} catch (error) {
+  console.error("[NEXO] Erro ao trocar câmera:", error);
 
-  } catch (error) {
-    console.error("[NEXO] Erro ao trocar câmera:", error);
-
-    showNotice(
+  showNotice(
       chatNotice,
       error.message || "Não foi possível trocar a câmera."
     );
