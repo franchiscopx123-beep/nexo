@@ -1503,6 +1503,7 @@ async function switchCamera() {
   }
 
   switchCameraBtn.disabled = true;
+  console.log("[NEXO] switchCamera iniciou");
 
   let newStream = null;
   let cameraChanged = false;
@@ -1659,7 +1660,7 @@ console.log(
     if (newStream && !cameraChanged) {
       newStream.getTracks().forEach(track => track.stop());
     }
-
+    console.log("[NEXO] switchCamera terminou");
     switchCameraBtn.disabled = false;
   }
 }
