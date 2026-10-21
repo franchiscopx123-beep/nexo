@@ -255,6 +255,8 @@ app.get("/api/me", (req, res) => {
 
 // Cadastro
 app.post("/api/register", sameOrigin, async (req, res) => {
+  console.log("[NEXO] Requisição de cadastro recebida.");
+
   const username = normalizeUsername(req.body?.username);
   const email = normalizeEmail(req.body?.email);
   const password = req.body?.password;
@@ -277,7 +279,7 @@ app.post("/api/register", sameOrigin, async (req, res) => {
 
   if (!validPassword(password)) {
     return res.status(400).json({
-      error: "A senha deve ter entre 8 e 72 caracteres.",
+      error: "A senha deve ter entre 6 e 72 caracteres.",
     });
   }
 
