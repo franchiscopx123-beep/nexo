@@ -1985,16 +1985,27 @@ updateCallButtons();
 function finishCall(notifyPeer = true, message = "") {
   const targetId = callPeerId;
 
+  console.log("[NEXO] Encerrando chamada:", {
+    notifyPeer,
+    targetId,
+    socketConnected: socket?.connected
+  });
+
   if (notifyPeer && targetId && socket?.connected) {
+    console.log("[NEXO] Enviando call:end para:", targetId);
+
     socket.emit("call:end", {
-      targetId
+      targetId: targetId
     });
+  } else if (notifyPeer && targetId) {
+    console.warn(
+      "[NEXO] Não foi possível avisar o outro participante: Socket.IO desconectado."
+    );
   }
 
   resetCallInterface();
 
   if (message) {
-    callStatus.textContent = message;
     showNotice(chatNotice, message);
   }
 }
@@ -2111,11 +2122,17 @@ function registerCallSocketEvents() {
     finishCall(false, `${callPeerName} está ocupado.`);
   });
 
-  socket.on("call:end", (data) => {
-    if (String(data?.from?.id) !== String(callPeerId)) return;
-    finishCall(false, `${callPeerName} encerrou a chamada.`);
-  });
-}
+ socket.on("call:end", (data) => {
+  console.log("[NEXO] Evento call:end recebido:", data);
+  console.log("[NEXO] Participante esperado:", callPeerId);
+
+  if (String(data?.from?.id) !== String(callPeerId)) {
+    console.warn("[NEXO] Evento ignorado: participante diferente.");
+    return;
+  }
+
+  finishCall(false, `${callPeerName} encerrou a chamada.`);
+});
     async function initialize() {
       setMode("login");
 
