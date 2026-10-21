@@ -453,6 +453,7 @@ io.use((socket, next) => {
 // --------------------------------------------------
 
 const onlineSockets = new Map();
+const nearbySockets = new Map();
 const typingByChannel = new Map();
 const lastMessageAt = new Map();
 
@@ -472,6 +473,23 @@ function getOnlineUsers() {
 
 function broadcastOnlineUsers() {
   io.emit("online users", getOnlineUsers());
+}
+
+function getNearbyUsers() {
+  const uniqueUsers = new Map();
+
+  for (const user of nearbySockets.values()) {
+    uniqueUsers.set(String(user.id), {
+      id: user.id,
+      username: user.username,
+    });
+  }
+
+  return Array.from(uniqueUsers.values());
+}
+
+function broadcastNearbyUsers() {
+  io.emit("nearby:users", getNearbyUsers());
 }
 
 function removeTyping(socket, channel) {
@@ -500,6 +518,28 @@ io.on("connection", (socket) => {
   });
 
   broadcastOnlineUsers();
+  
+  socket.on("nearby:enable", () => {
+    nearbySockets.set(socket.id, {
+      id: user.id,
+      username: user.username,
+    });
+
+    socket.emit("nearby:status", { enabled: true });
+    broadcastNearbyUsers();
+  });
+
+  socket.on("nearby:disable", () => {
+    nearbySockets.delete(socket.id);
+
+    socket.emit("nearby:status", { enabled: false });
+    broadcastNearbyUsers();
+  });
+
+  socket.on("nearby:request", () => {
+    socket.emit("nearby:users", getNearbyUsers());
+  });
+
 
   socket.on("join channel", async (channel) => {
     if (!validChannel(channel)) {
@@ -683,18 +723,19 @@ io.on("connection", (socket) => {
     });
   }
 
-  socket.on("disconnect", () => {
-    onlineSockets.delete(socket.id);
+socket.on("disconnect", () => {
+  onlineSockets.delete(socket.id);
 
-    if (socket.currentChannel) {
-      removeTyping(socket, socket.currentChannel);
-    }
+  nearbySockets.delete(socket.id);
+  broadcastNearbyUsers();
 
-    lastMessageAt.delete(socket.id);
-    broadcastOnlineUsers();
-  });
+  if (socket.currentChannel) {
+    removeTyping(socket, socket.currentChannel);
+  }
+
+  lastMessageAt.delete(socket.id);
+  broadcastOnlineUsers();
 });
-
 // --------------------------------------------------
 // ERROS
 // --------------------------------------------------
