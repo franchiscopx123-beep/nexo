@@ -517,8 +517,7 @@
       min-width: 0;
     }
   }
-
-/* Janela de chamada de voz e vídeo */
+/* Janela de chamada modernizada — NEXO */
 #callOverlay {
   position: fixed;
   inset: 0;
@@ -526,73 +525,224 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 20px;
-  background: rgba(3, 7, 18, 0.88);
-  backdrop-filter: blur(8px);
+  padding: 16px;
+  background: rgba(3, 7, 18, 0.94);
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
 }
 
 #callOverlay[hidden] {
-  display: none;
+  display: none !important;
 }
 
 .call-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
   width: 100%;
-  max-width: 520px;
-  padding: 24px;
+  max-width: 1000px;
+  height: min(700px, calc(100dvh - 32px));
+  padding: 0;
+  overflow: hidden;
   border: 1px solid var(--border);
-  border-radius: 20px;
-  background: var(--panel);
+  border-radius: 24px;
+  background: #0b1322;
   color: var(--text);
   text-align: center;
-  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.45);
+  box-shadow: 0 30px 100px rgba(0, 0, 0, 0.6);
+}
+
+#callTitle {
+  position: absolute;
+  z-index: 10;
+  top: 0;
+  left: 0;
+  right: 0;
+  margin: 0;
+  padding: 20px 24px 4px;
+  color: #f8fafc;
+  font-size: 18px;
+  font-weight: 750;
+  text-shadow: 0 2px 5px rgba(0, 0, 0, 0.65);
+  pointer-events: none;
 }
 
 #callStatus {
-  color: var(--muted);
-  margin-bottom: 20px;
+  position: absolute;
+  z-index: 10;
+  top: 44px;
+  left: 12px;
+  right: 12px;
+  margin: 0;
+  color: #cbd5e1;
+  font-size: 13px;
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.8);
+  overflow-wrap: anywhere;
+  pointer-events: none;
 }
 
 #remoteVideo {
   display: block;
+  flex: 1;
   width: 100%;
-  max-height: 320px;
-  object-fit: cover;
-  border-radius: 12px;
-  background: #05070d;
+  height: 100%;
+  min-height: 0;
+  object-fit: contain;
+  background: #030712;
 }
 
 #localVideo {
   display: block;
-  width: 120px;
-  max-height: 160px;
-  margin: 12px auto;
-  border-radius: 10px;
-  background: #05070d;
+  position: absolute;
+  z-index: 5;
+  right: 20px;
+  bottom: 110px;
+  width: 140px;
+  height: 185px;
+  max-height: none;
+  margin: 0;
+  border: 2px solid rgba(255, 255, 255, 0.2);
+  border-radius: 15px;
   object-fit: cover;
+  background: #0b1322;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.5);
 }
 
 #incomingCallActions,
 #activeCallActions {
+  position: relative;
+  z-index: 10;
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   justify-content: center;
-  gap: 10px;
-  margin-top: 18px;
+  gap: 12px;
+  width: 100%;
+  margin-top: auto;
+  padding: 16px;
+  border-top: 1px solid var(--border);
+  background: #0e172a;
 }
 
 #incomingCallActions[hidden],
-#activeCallActions[hidden] {
-  display: none;
+#activeCallActions[hidden],
+#switchCameraBtn[hidden],
+#remoteVideo[hidden],
+#localVideo[hidden] {
+  display: none !important;
 }
 
-#callOverlay button {
-  padding: 10px 16px;
-  border: 0;
-  border-radius: 10px;
+  #callOverlay button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 11px 17px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 12px;
+  background: #1e293b;
+  color: #fff;
+  font-size: 14px;
+  font-weight: 650;
   cursor: pointer;
-  font-weight: 600;
+  transition: background 0.2s ease, transform 0.2s ease;
 }
 
+#callOverlay button:hover:not(:disabled) {
+  background: #334155;
+}
+
+#callOverlay button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+#acceptCallBtn {
+  background: #059669;
+  border-color: #10b981;
+}
+
+#acceptCallBtn:hover:not(:disabled) {
+  background: #047857;
+}
+
+#declineCallBtn,
+#endCallBtn {
+  background: #dc2626;
+  border-color: #ef4444;
+}
+
+#declineCallBtn:hover:not(:disabled),
+#endCallBtn:hover:not(:disabled) {
+  background: #b91c1c;
+}
+
+@media (max-width: 640px) {
+  #callOverlay {
+    padding: 0;
+  }
+
+  .call-card {
+    width: 100%;
+    height: 100vh;
+    height: 100dvh;
+    max-width: none;
+    max-height: none;
+    border: 0;
+    border-radius: 0;
+  }
+
+  #callTitle {
+    padding-top: max(18px, env(safe-area-inset-top));
+  }
+
+  #callStatus {
+    top: calc(max(18px, env(safe-area-inset-top)) + 28px);
+  }
+
+  #localVideo {
+    right: 12px;
+    bottom: 112px;
+    width: 100px;
+    height: 140px;
+    border-radius: 12px;
+  }
+
+  #incomingCallActions,
+  #activeCallActions {
+    gap: 8px;
+    padding: 12px 10px max(12px, env(safe-area-inset-bottom));
+  }
+
+  #callOverlay button {
+    flex: 1 1 auto;
+    min-width: 0;
+    padding: 11px 10px;
+    font-size: 12px;
+  }
+}
+
+@media (max-width: 360px) {
+  #localVideo {
+    width: 84px;
+    height: 118px;
+    right: 8px;
+    bottom: 120px;
+  }
+
+  #incomingCallActions,
+  #activeCallActions {
+    gap: 6px;
+    padding-left: 6px;
+    padding-right: 6px;
+  }
+
+  #callOverlay button {
+    padding: 10px 7px;
+    font-size: 11px;
+  }
+}
 </style>
 </head>
 <body>
