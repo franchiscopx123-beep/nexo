@@ -2083,34 +2083,37 @@ function registerCallSocketEvents() {
     finishCall(false, `${callPeerName} está ocupado.`);
   });
 
- socket.on("call:end", (data) => {
-  console.log("[NEXO] Evento call:end recebido:", data);
-  console.log("[NEXO] Participante esperado:", callPeerId);
 
-  if (String(data?.from?.id) !== String(callPeerId)) {
-    console.warn("[NEXO] Evento ignorado: participante diferente.");
-    return;
-  }
+  socket.on("call:end", (data) => {
+    console.log("[NEXO] Evento call:end recebido:", data);
+    console.log("[NEXO] Participante esperado:", callPeerId);
 
-  finishCall(false, `${callPeerName} encerrou a chamada.`);
-});
-    async function initialize() {
-      setMode("login");
-
-      try {
-        const data = await api("/api/me");
-        currentUser = data.user || data;
-
-        if (currentUser && (
-          currentUser.username || currentUser.name ||
-          currentUser.email || currentUser.id
-        )) {
-          await enterChat();
-        }
-      } catch (_) {
-        // Sem sessão ativa: mostra a tela de login.
-      }
+    if (String(data?.from?.id) !== String(callPeerId)) {
+      console.warn("[NEXO] Evento ignorado: participante diferente.");
+      return;
     }
+
+    finishCall(false, `${callPeerName} encerrou a chamada.`);
+  });
+} // Fecha registerCallSocketEvents()
+
+async function initialize() {
+  setMode("login");
+
+  try {
+    const data = await api("/api/me");
+    currentUser = data.user || data;
+
+    if (currentUser && (
+      currentUser.username || currentUser.name ||
+      currentUser.email || currentUser.id
+    )) {
+      await enterChat();
+    }
+  } catch (_) {
+    // Sem sessão ativa: mostra a tela de login.
+  }
+}
 
     window.addEventListener("error", (event) => {
       console.error("Erro no NEXO:", event.message, event.filename, event.lineno);
