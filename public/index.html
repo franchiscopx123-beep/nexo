@@ -1478,51 +1478,36 @@ async function getCallMedia(mode) {
   });
 }
 
-
-
-
 async function switchCamera() {
   if (!localStream || !peerConnection || callMode !== "video") {
-    showNotice(
-      chatNotice,
-      "Inicie ou atenda uma chamada de vídeo primeiro."
-    );
     return;
   }
 
   switchCameraBtn.disabled = true;
 
   let newStream = null;
-  let switched = false;
+  let cameraChanged = false;
 
   try {
     const currentTrack = localStream.getVideoTracks()[0];
 
-    if (!currentTrack || currentTrack.readyState !== "live") {
-      throw new Error("A câmera atual não está ativa.");
+    if (!currentTrack) {
+      throw new Error("Nenhuma câmera está ativa.");
     }
 
     const currentSettings = currentTrack.getSettings();
-    const currentDeviceId = currentSettings.deviceId || "";
+    const currentDeviceId = currentSettings.deviceId;
+
     const currentFacing =
-      currentSettings.facingMode ||
-      currentCameraFacing ||
-      "user";
+      currentSettings.facingMode || currentCameraFacing;
 
     const nextFacing =
       currentFacing === "environment" ? "user" : "environment";
 
-    const sender = peerConnection.getSenders().find(
-      item => item.track === currentTrack
-    ) || peerConnection.getSenders().find(
-      item => item.track?.kind === "video"
-    );
+    console.log("[NEXO] Câmera atual:", currentSettings);
+    console.log("[NEXO] Tentando mudar para:", nextFacing);
 
-    if (!sender) {
-      throw new Error("Não foi encontrado o transmissor de vídeo.");
-    }
-
-    // Primeira tentativa: solicitar a câmera do lado oposto.
+    // Primeiro, tenta exigir a câmera frontal ou traseira.
     try {
       newStream = await navigator.mediaDevices.getUserMedia({
         audio: false,
@@ -1532,141 +1517,117 @@ async function switchCamera() {
           height: { ideal: 720 }
         }
       });
-    } catch (facingError) {
+    } catch (error) {
       console.warn(
-        "Não foi possível selecionar pelo facingMode:",
-        facingError
+        "[NEXO] Não foi possível selecionar por facingMode:",
+        error
       );
     }
 
     let newTrack = newStream?.getVideoTracks()[0];
-    let newSettings = newTrack?.getSettings() || {};
 
-    // IMPORTANTE: o Android pode abrir a mesma câmera
-    // mesmo quando a solicitação parece ter funcionado.
-    const sameDevice =
-      !!currentDeviceId &&
-      !!newSettings.deviceId &&
-      currentDeviceId === newSettings.deviceId;
-
-    const sameFacing =
-      !!currentSettings.facingMode &&
-      !!newSettings.facingMode &&
-      currentSettings.facingMode === newSettings.facingMode;
-
-    if (!newTrack || sameDevice || sameFacing) {
-      // Descarta a tentativa que não mudou de câmera.
+    // Se o navegador devolveu a mesma câmera, tenta selecionar
+    // explicitamente outro dispositivo pelo deviceId.
+    if (
+      !newTrack ||
+      (
+        currentDeviceId &&
+        newTrack.getSettings().deviceId === currentDeviceId
+      )
+    ) {
       if (newStream) {
         newStream.getTracks().forEach(track => track.stop());
         newStream = null;
       }
 
-      // Segunda tentativa: selecionar explicitamente outro deviceId.
       const devices =
         await navigator.mediaDevices.enumerateDevices();
 
       const cameras = devices.filter(
-        device =>
-          device.kind === "videoinput" &&
-          device.deviceId &&
-          device.deviceId !== currentDeviceId
+        device => device.kind === "videoinput"
       );
 
-      // Prioriza uma câmera identificada como frontal/traseira.
-      const preferredCamera = cameras.find(device => {
-        const label = device.label.toLowerCase();
-
-        return nextFacing === "environment"
-          ? /back|rear|environment|traseira|trás/.test(label)
-          : /front|user|frontal|dianteira/.test(label);
-      });
-
-      const otherCamera = preferredCamera || cameras[0];
+      const otherCamera = cameras.find(
+        camera =>
+          camera.deviceId &&
+          camera.deviceId !== currentDeviceId
+      );
 
       if (!otherCamera) {
         throw new Error(
-          "O Chrome não encontrou outra câmera. Verifique a permissão de câmera do site."
+          "O Android não disponibilizou outra câmera para seleção."
         );
       }
+
+      console.log(
+        "[NEXO] Tentando câmera alternativa:",
+        otherCamera.label || otherCamera.deviceId
+      );
 
       newStream = await navigator.mediaDevices.getUserMedia({
         audio: false,
         video: {
-          deviceId: { exact: otherCamera.deviceId },
-          width: { ideal: 1280 },
-          height: { ideal: 720 }
+          deviceId: { exact: otherCamera.deviceId }
         }
       });
 
       newTrack = newStream.getVideoTracks()[0];
-      newSettings = newTrack?.getSettings() || {};
-
-      if (!newTrack) {
-        throw new Error("A outra câmera não forneceu vídeo.");
-      }
-
-      // Não substitui a câmera atual se o Chrome
-      // tiver devolvido novamente o mesmo dispositivo.
-      if (
-        currentDeviceId &&
-        newSettings.deviceId &&
-        currentDeviceId === newSettings.deviceId
-      ) {
-        throw new Error(
-          "O Android abriu novamente a mesma câmera. Não foi possível selecionar a outra."
-        );
-      }
     }
 
-    // Troca a faixa enviada pela chamada.
+    if (!newTrack) {
+      throw new Error("Não foi possível abrir a outra câmera.");
+    }
+
+    const sender = peerConnection
+      .getSenders()
+      .find(item => item.track?.kind === "video");
+
+    if (!sender) {
+      throw new Error(
+        "Não foi encontrada a transmissão de vídeo ativa."
+      );
+    }
+
+    // Troca a faixa enviada sem recriar a chamada.
     await sender.replaceTrack(newTrack);
 
     localStream.removeTrack(currentTrack);
     localStream.addTrack(newTrack);
 
     localVideo.srcObject = localStream;
-
-    try {
-      await localVideo.play();
-    } catch (playError) {
-      console.warn("Erro ao atualizar a prévia:", playError);
-    }
+    await localVideo.play().catch(() => {});
 
     currentCameraFacing =
-      newSettings.facingMode || nextFacing;
+      newTrack.getSettings().facingMode ||
+      nextFacing;
 
     currentTrack.stop();
-    switched = true;
+    cameraChanged = true;
 
-    hideNotice(chatNotice);
+    callStatus.textContent = "Câmera alterada.";
 
-    callStatus.textContent =
-      currentCameraFacing === "environment"
-        ? "Câmera traseira ativada."
-        : "Câmera frontal ativada.";
-
-    console.log("Câmera selecionada:", {
-      deviceId: newSettings.deviceId,
-      facingMode: newSettings.facingMode,
-      label: newTrack.label
-    });
+    console.log(
+      "[NEXO] Câmera nova:",
+      newTrack.getSettings()
+    );
 
   } catch (error) {
-    console.error("Erro ao virar a câmera:", error);
+    console.error("[NEXO] Erro ao trocar a câmera:", error);
 
     showNotice(
       chatNotice,
-      error.message ||
-        "Não foi possível trocar a câmera. Verifique a permissão da câmera."
+      error.message || "Não foi possível trocar a câmera."
     );
+
   } finally {
-    if (newStream && !switched) {
+    if (newStream && !cameraChanged) {
       newStream.getTracks().forEach(track => track.stop());
     }
 
     switchCameraBtn.disabled = false;
   }
 }
+
 
 function createPeerConnection() {
   if (!localStream) {
