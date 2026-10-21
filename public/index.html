@@ -876,12 +876,13 @@
           <div style="margin-top: 20px; padding: 18px; border: 1px solid #334155; border-radius: 12px;">
             <h3>Encontre pessoas perto de você</h3>
             <p>A localização será opcional. Sua posição exata não será exibida para outros usuários.</p>
-            <button id="enableNearbyBtn" type="button">
-              Ativar localização
-            </button>
+           <button id="enableNearbyBtn" type="button">
+              Quero aparecer na lista
+               </button>
+
             <p id="nearbyStatus" role="status">
-              Você ainda não ativou a localização.
-            </p>
+             Você não está aparecendo na lista.
+           </p>
           </div>
 
           <div id="nearbyUsersList" style="margin-top: 20px;">
@@ -950,6 +951,12 @@
     const messageInput = $("#messageInput");
     const sendBtn = $("#sendBtn");
     const chatNotice = $("#chatNotice");
+    const enableNearbyBtn = $("#enableNearbyBtn");
+    const nearbyStatus = $("#nearbyStatus");
+    const nearbyUsersList = $("#nearbyUsersList");
+
+let nearbyEnabled = false;
+
 
     let authMode = "login";
     let currentUser = null;
@@ -1308,6 +1315,56 @@ console.log("[NEXO] Cadastro concluído:", data);
     function scrollToBottom() {
       messagesBox.scrollTop = messagesBox.scrollHeight;
     }
+    
+function renderNearbyUsers(users) {
+  nearbyUsersList.replaceChildren();
+
+  const otherUsers = Array.isArray(users)
+    ? users.filter(
+        user =>
+          user &&
+          user.id != null &&
+          String(user.id) !== String(currentUser?.id)
+      )
+    : [];
+
+  if (!otherUsers.length) {
+    const empty = document.createElement("p");
+    empty.textContent =
+      "Ainda não há outras pessoas disponíveis na lista.";
+    nearbyUsersList.appendChild(empty);
+    return;
+  }
+
+  otherUsers.forEach(user => {
+    const card = document.createElement("div");
+
+    card.style.cssText =
+      "display:flex;align-items:center;gap:12px;" +
+      "margin-top:10px;padding:14px;" +
+      "border:1px solid #26344c;border-radius:12px;";
+
+    const avatar = document.createElement("div");
+    avatar.className = "avatar";
+    avatar.textContent =
+      (user.username || "U").charAt(0).toUpperCase();
+
+    const details = document.createElement("div");
+
+    const name = document.createElement("strong");
+    name.textContent = user.username || "Usuário";
+
+    const status = document.createElement("p");
+    status.style.cssText =
+      "margin:5px 0 0;color:#34d399;font-size:12px;";
+    status.textContent = "Disponível na lista do NEXO";
+
+    details.append(name, status);
+    card.append(avatar, details);
+    nearbyUsersList.appendChild(card);
+  });
+}
+
 
     function setConnection(online, label) {
       $("#connectionStatus").classList.toggle("online", online);
@@ -1334,11 +1391,33 @@ console.log("[NEXO] Cadastro concluído:", data);
         setConnection(true, "Conectado");
         hideNotice(chatNotice);
         socket.emit("join channel", currentChannel);
+        if (nearbyEnabled) {
+  socket.emit("nearby:enable");
+} else {
+  socket.emit("nearby:request");
+}
       });
 
       socket.on("disconnect", () => {
         setConnection(false, "Reconectando...");
       });
+      
+socket.on("nearby:status", data => {
+  nearbyEnabled = data?.enabled === true;
+
+  enableNearbyBtn.textContent = nearbyEnabled
+    ? "Deixar de aparecer na lista"
+    : "Quero aparecer na lista";
+
+  nearbyStatus.textContent = nearbyEnabled
+    ? "Você está aparecendo na lista de pessoas disponíveis."
+    : "Você não está aparecendo na lista.";
+});
+
+socket.on("nearby:users", users => {
+  renderNearbyUsers(users);
+});
+
 
       socket.on("connect_error", (error) => {
         setConnection(false, "Sem conexão");
@@ -2438,6 +2517,31 @@ function showConversations() {
         }
       });
     });
+    
+enableNearbyBtn.addEventListener("click", () => {
+  if (!socket?.connected) {
+    nearbyStatus.textContent =
+      "Sem conexão com o servidor. Aguarde e tente novamente.";
+    return;
+  }
+
+  enableNearbyBtn.disabled = true;
+
+  if (nearbyEnabled) {
+    socket.emit("nearby:disable");
+  } else {
+    socket.emit("nearby:enable");
+  }
+
+  // Evita deixar o botão bloqueado se a confirmação demorar.
+  setTimeout(() => {
+    enableNearbyBtn.disabled = false;
+  }, 2000);
+});
+
+socket?.on("nearby:status", () => {
+  enableNearbyBtn.disabled = false;
+});
   </script>
 </body>
 </html>
