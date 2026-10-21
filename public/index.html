@@ -1494,6 +1494,8 @@ async function getCallMedia(mode) {
 
 
 async function switchCamera() {
+  callStatus.textContent = "Teste: botão Virar câmera acionado.";
+  console.log("[NEXO] switchCamera() foi executada.");
   if (
     !localStream ||
     !peerConnection ||
@@ -1689,7 +1691,7 @@ async function switchCamera() {
       "Falha ao trocar câmera: " +
       (error.message || "erro desconhecido");
 
-  } finally {
+    } finally {
     if (newStream && !cameraChanged) {
       newStream.getTracks().forEach(track => track.stop());
     }
@@ -1698,6 +1700,7 @@ async function switchCamera() {
   }
 }
 
+function createPeerConnection() {
   if (!localStream) {
     throw new Error("O microfone ou a câmera ainda não foram inicializados.");
   }
