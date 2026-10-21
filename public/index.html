@@ -897,9 +897,16 @@
         }
 
         await enterChat();
-      } catch (error) {
-        showNotice(authNotice, error.message || "Não foi possível autenticar.");
-      } finally {
+      
+} catch (error) {
+  console.error("[NEXO] Erro no cadastro/login:", error);
+
+  showNotice(
+    authNotice,
+    error.message || "Não foi possível autenticar."
+  );
+} finally {
+
         authSubmit.disabled = false;
         authSubmit.textContent = authMode === "register" ? "Criar conta" : "Entrar";
       }
