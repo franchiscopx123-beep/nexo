@@ -2356,7 +2356,32 @@ async function initialize() {
       console.error("Falha em uma operação do NEXO:", event.reason);
     });
 
-    initialize();
+initialize();
+
+    // Navegação das novas áreas do NEXO
+    document.querySelectorAll('[data-section]').forEach((button) => {
+      button.addEventListener('click', () => {
+        const section = button.dataset.section;
+
+        if (section === 'conversas') {
+          document.querySelectorAll('[data-section]').forEach((item) => {
+            item.classList.toggle('active', item === button);
+          });
+
+          return;
+        }
+
+        const names = {
+          proximos: 'Pessoas próximas',
+          salas: 'Salas',
+          desafios: 'Desafios'
+        };
+
+        if (names[section]) {
+          alert(names[section] + ' — em breve no NEXO!');
+        }
+      });
+    });
   </script>
 </body>
 </html>
